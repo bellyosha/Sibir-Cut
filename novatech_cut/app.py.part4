@@ -1,21 +1,130 @@
+            self._air_test_exported=False;self.refresh_all()
+        def center_selected():
+            if not self.project.objects:return
+            if self.current_index() is None:self.listbox.selection_set(0);self.listbox.activate(0)
+            self.align('center');render()
+        def open_export_folder():
+            if not self.last_export_path:
+                messagebox.showinfo('Папка','Сначала экспортируйте файл.',parent=w);return
+            folder=str(Path(self.last_export_path).parent)
+            try:os.startfile(folder)
+            except Exception as exc:messagebox.showerror('Папка',str(exc),parent=w)
+
+        def render():
+            clear();i=step['i'];step_label.config(text=f'Шаг {i+1} из {len(titles)} — {titles[i]}')
+            back.config(state='normal' if i>0 else 'disabled');nextb.config(text='Готово' if i==len(titles)-1 else 'Далее →')
+            if i==0:
+                desc.config(text='Сначала нужен объект для резки или рисования.')
+                if self.project.objects:note(f'✓ Загружено объектов: {len(self.project.objects)}','ok')
+                else:note('Файл ещё не загружен. Нажмите «Импорт» в главном окне или кнопку ниже.','bad')
+                ttk.Button(body,text='Импортировать файл…',command=self.do_import).pack(anchor='w',pady=10)
+                note('Для растровой картинки выбирайте «Нет» на вопрос про осевые линии, если нужно вырезать контур или полностью закрашивать фигуру.')
+            elif i==1:
+                desc.config(text='Разместите объект на столе. Теперь его можно хватать левой кнопкой мыши прямо в главном координатном поле и перетаскивать.')
+                ok,msg=self._placement_ok();note(('✓ ' if ok else '⚠ ')+msg,'ok' if ok else 'warn')
+                note('Окно мастера не блокирует главное окно: потяните объект мышкой. Зелёная пунктирная рамка показывает выбранный объект. Точные X/Y остаются слева.')
+                ttk.Button(body,text='Поставить выбранный объект по центру',command=center_selected).pack(anchor='w',pady=8)
+                ttk.Button(body,text='Обновить проверку размещения',command=render).pack(anchor='w')
+            elif i==2:
+                desc.config(text='Выберите, что делает инструмент. Для ножа нужна «Резка» — только границы. Для ручки/маркера «Рисование» может обводить и закрашивать всю площадь.')
+                grid=ttk.Frame(body);grid.pack(fill='x',anchor='n')
+                ttk.Label(grid,text='Профиль материала / инструмента').grid(row=0,column=0,sticky='w',pady=4);cb=ttk.Combobox(grid,textvariable=wmat,values=[x.name for x in DEFAULT_MATERIALS],state='readonly',width=34);cb.grid(row=0,column=1,sticky='ew',pady=4);cb.bind('<<ComboboxSelected>>',load_material)
+                ttk.Label(grid,text='Операция').grid(row=1,column=0,sticky='w',pady=4);ttk.Combobox(grid,textvariable=wm,values=['Резка','Рисование'],state='readonly').grid(row=1,column=1,sticky='ew',pady=4)
+                ttk.Label(grid,text='Рабочая скорость, мм/с').grid(row=2,column=0,sticky='w',pady=4);ttk.Entry(grid,textvariable=wspeed).grid(row=2,column=1,sticky='ew',pady=4)
+                ttk.Label(grid,text='Проходов').grid(row=3,column=0,sticky='w',pady=4);ttk.Entry(grid,textvariable=wpasses).grid(row=3,column=1,sticky='ew',pady=4)
+                cut=ttk.LabelFrame(body,text='Если выбрана резка',padding=8);cut.pack(fill='x',pady=8)
+                ttk.Label(cut,text='Blade offset, мм').grid(row=0,column=0,sticky='w');ttk.Entry(cut,textvariable=wblade,width=12).grid(row=0,column=1,padx=8);ttk.Label(cut,text='Overcut, мм').grid(row=0,column=2,sticky='w');ttk.Entry(cut,textvariable=wover,width=12).grid(row=0,column=3,padx=8)
+                draw=ttk.LabelFrame(body,text='Если выбрано рисование',padding=8);draw.pack(fill='x',pady=8)
+                ttk.Label(draw,text='Режим').grid(row=0,column=0,sticky='w');ttk.Combobox(draw,textvariable=wstyle,values=['Контур + заливка','Только заливка','Только контур'],state='readonly',width=24).grid(row=0,column=1,columnspan=3,sticky='ew',padx=8)
+                ttk.Label(draw,text='Шаг заливки, мм').grid(row=1,column=0,sticky='w');ttk.Entry(draw,textvariable=wspacing,width=10).grid(row=1,column=1,padx=8);ttk.Label(draw,text='Угол, °').grid(row=1,column=2,sticky='w');ttk.Entry(draw,textvariable=wangle,width=10).grid(row=1,column=3,padx=8)
+                ttk.Label(draw,text='Отступ от края, мм').grid(row=2,column=0,sticky='w');ttk.Entry(draw,textvariable=winset,width=10).grid(row=2,column=1,padx=8);ttk.Checkbutton(draw,text='Перекрёстная заливка',variable=wcross).grid(row=2,column=2,columnspan=2,sticky='w')
+                grid.columnconfigure(1,weight=1)
+                note('Для заполненных букв: «Рисование» → «Контур + заливка». Для вырезания тех же букв: «Резка».')
+            elif i==3:
+                desc.config(text='Калибровка сообщает программе, где относительно сопла находится UMTS и на какой Z инструмент касается материала.')
+                p=self.project.printer
+                if p.calibrated:note(f'✓ Профиль откалиброван. Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}; рабочая Z={p.work_z:.2f}; безопасная Z={p.safe_z:.2f}.','ok')
+                else:note('Профиль ещё не откалиброван. Реальный экспорт заблокирован.','bad')
+                note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Безопасная Z — инструмент гарантированно не касается материала.\n• Рабочая Z — нож/ручка касается материала с нужным прижимом.\n\nUMTS должен быть СНЯТ во время homing. Значения Z нельзя угадывать: их определяют на конкретном модуле маленькими шагами.')
+                ttk.Button(body,text='Открыть мастер калибровки',command=self.calibrate).pack(anchor='w',pady=8);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
+            elif i==4:
+                desc.config(text='Сначала проверяем траекторию без касания материала. Это обязательный этап перед первым реальным запуском.')
+                if self._air_test_exported:note('✓ Воздушный тест для текущего задания сохранён.','ok')
+                else:note('Воздушный тест ещё не сохранён.','warn')
+                note('1. UMTS перед стартом файла должен быть снят.\n2. Запустите воздушный файл на A1.\n3. Принтер выполнит homing и встанет в парковку.\n4. На паузе установите UMTS и продолжите.\n5. Убедитесь, что инструмент нигде не касается стола и вся траектория остаётся в нужной зоне.')
+                def air():
+                    if self.export(air=True,show_message=False):messagebox.showinfo('Воздушный тест','Файл сохранён. Перенесите его на принтер и проверьте движение без касания материала.',parent=w);render()
+                ttk.Button(body,text='Сохранить файл воздушного теста…',command=air).pack(anchor='w',pady=8)
+            else:
+                desc.config(text='После успешного воздушного теста можно сформировать рабочий файл и запустить его на A1.')
+                note('В этой версии Novatech Cut готовит проверенный .gcode.3mf, но не отправляет его на принтер по сети автоматически.')
+                note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.3mf.\n2. Перенесите файл на microSD/локальный носитель, с которого A1 показывает задания.\n3. ПЕРЕД стартом снимите UMTS.\n4. Запустите файл: сначала выполняется homing без UMTS, затем головка паркуется.\n5. На первой паузе установите UMTS и продолжите.\n6. Выполнится резка/рисование без нагрева и экструзии.\n7. В конце головка поднимется и припаркуется; на второй паузе снимите UMTS, затем завершите задание.','warn')
+                def final_export():
+                    if not self._air_test_exported:
+                        if not messagebox.askyesno('Воздушный тест','Для текущего задания не отмечен сохранённый воздушный тест. Всё равно перейти к экспорту?',parent=w):return
+                    if self.export(air=False,show_message=False):messagebox.showinfo('Рабочий файл','Рабочий файл создан. Теперь перенесите его на принтер по инструкции в этом окне.',parent=w);render()
+                ttk.Button(body,text='Экспортировать рабочий .gcode.3mf…',style='Danger.TButton',command=final_export).pack(anchor='w',pady=8)
+                ttk.Button(body,text='Открыть папку последнего экспорта',command=open_export_folder).pack(anchor='w')
+        def go(delta):
+            i=step['i']
+            if delta>0:
+                if i==0 and not self.project.objects:messagebox.showwarning('Шаг 1','Сначала импортируйте хотя бы один объект.',parent=w);return
+                if i==1:
+                    ok,msg=self._placement_ok()
+                    if not ok:messagebox.showwarning('Размещение','Объект выходит за безопасную область. Перетащите его на поле или используйте кнопку центрирования.',parent=w);return
+                if i==2:
+                    try:apply_settings()
+                    except Exception as exc:messagebox.showerror('Параметры',str(exc),parent=w);return
+                if i==3 and not self.project.printer.calibrated:messagebox.showwarning('Калибровка','Сначала завершите калибровку профиля A1 + UMTS.',parent=w);return
+                if i==4 and not self._air_test_exported:messagebox.showwarning('Воздушный тест','Сначала сохраните и проверьте воздушный тест.',parent=w);return
+                if i==len(titles)-1:w.destroy();return
+            step['i']=max(0,min(len(titles)-1,i+delta));render()
+        back.config(command=lambda:go(-1));nextb.config(command=lambda:go(1))
+        def closed():self._wizard=None;w.destroy()
+        w.protocol('WM_DELETE_WINDOW',closed);render()
+
+    def calibrate(self):
+        w=tk.Toplevel(self);w.title('Мастер калибровки A1 + UMTS');w.geometry('620x520');w.transient(self);w.grab_set()
+        txt=tk.Text(w,wrap='word',font=('Segoe UI',10));txt.pack(fill='both',expand=True,padx=10,pady=10)
+        txt.insert('1.0','''Мастер калибровки Novatech Cut
+
+1. Снимите UMTS. Любой homing выполняется только без режущего модуля.
+2. Выполните штатный homing на принтере.
+3. Закрепите материал/коврик.
+4. Установите UMTS только после остановки головки.
+5. Определите смещение X/Y инструмента относительно сопла.
+6. Найдите безопасную Z-высоту, затем рабочую Z маленькими шагами.
+7. Выполните воздушный квадрат и круг.
+8. Затем тест Z на ненужном материале.
+
+Это приложение не отправляет команды на принтер напрямую. Введите измеренные значения ниже. Экспорт станет доступен только после явного подтверждения.
+''');txt.config(state='disabled')
+        frm=ttk.Frame(w,padding=10);frm.pack(fill='x');vx=tk.DoubleVar(value=self.project.printer.tool_offset_x);vy=tk.DoubleVar(value=self.project.printer.tool_offset_y);vw=tk.DoubleVar(value=self.project.printer.work_z);vs=tk.DoubleVar(value=self.project.printer.safe_z)
+        for lab,var in [('Offset X, мм',vx),('Offset Y, мм',vy),('Рабочая Z',vw),('Безопасная Z',vs)]:
             r=ttk.Frame(frm);r.pack(fill='x');ttk.Label(r,text=lab,width=18).pack(side='left');ttk.Entry(r,textvariable=var).pack(side='left',fill='x',expand=True)
-        ok=tk.BooleanVar(False);ttk.Checkbutton(frm,text='Я проверил воздушный тест и понимаю риск повреждения стола',variable=ok).pack(anchor='w',pady=8)
+        ok=tk.BooleanVar(False);ttk.Checkbutton(frm,text='Я физически измерил X/Y/Z и понимаю, что неверная рабочая Z может повредить стол',variable=ok).pack(anchor='w',pady=8)
         def apply():
-            if not ok.get():messagebox.showwarning('Калибровка','Подтвердите проверку воздушного теста.',parent=w);return
+            if not ok.get():messagebox.showwarning('Калибровка','Подтвердите, что значения измерены на вашем модуле, а не взяты наугад.',parent=w);return
             p=self.project.printer;p.tool_offset_x=vx.get();p.tool_offset_y=vy.get();p.work_z=vw.get();p.safe_z=vs.get();p.calibrated=True;self.project.material.work_z=p.work_z;self.project.material.safe_z=p.safe_z;w.destroy();self.refresh_all()
         ttk.Button(frm,text='Сохранить калибровку',command=apply).pack(fill='x')
-    def export(self,air=False):
+    def export(self,air=False,show_message=True):
         try:
             self.sync_material();paths=prepare_paths(self.project.objects,self.project.material)
             if not paths:raise GCodeError('Нет траекторий для экспорта')
             g,stats=generate_gcode(paths,self.project.printer,self.project.material,air_test=air)
-            ext='.airtest.gcode' if air else '.gcode.3mf';f=filedialog.asksaveasfilename(defaultextension=ext,filetypes=[('Bambu G-code 3MF','*.gcode.3mf'),('G-code','*.gcode')])
-            if not f:return
+            ext='.airtest.gcode.3mf' if air else '.gcode.3mf';f=filedialog.asksaveasfilename(defaultextension=ext,filetypes=[('Bambu G-code 3MF','*.gcode.3mf'),('G-code','*.gcode')])
+            if not f:return None
             if f.lower().endswith('.3mf'):build_gcode_3mf(f,g,stats,self.project.printer.name)
             else:Path(f).write_text(g,encoding='utf-8')
             report=Path(f+'.report.json');report.write_text(json.dumps({'air_test':air,'material':self.project.material.to_dict(),'printer':self.project.printer.to_dict(),'cut_length_mm':stats.cut_length_mm,'travel_length_mm':stats.travel_length_mm,'estimated_seconds':stats.estimated_seconds,'bounds':stats.bounds,'passes':stats.passes},ensure_ascii=False,indent=2),encoding='utf-8')
-            messagebox.showinfo('Экспорт',f'Готово.\n{f}\n\nПеред первым физическим резом обязательно проверьте воздушный тест.')
-        except Exception as e:messagebox.showerror('Экспорт заблокирован',str(e))
+            self.last_export_path=f
+            if air:self._air_test_exported=True
+            if show_message:
+                kind='воздушный тест' if air else 'задание'
+                messagebox.showinfo('Экспорт',f'Готово: {kind}.\n{f}\n\nФайл не отправляется на принтер автоматически — дальнейшие шаги есть в «Мастере подготовки и запуска».')
+            return f
+        except Exception as e:
+            messagebox.showerror('Экспорт заблокирован',str(e));return None
 
 def main():
     App().mainloop()
