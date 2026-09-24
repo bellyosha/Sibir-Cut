@@ -152,6 +152,11 @@ def main() -> int:
     try:
         run_self_test()
     except Exception:
+        tb=traceback.format_exc()
+        try:
+            (Path(tempfile.gettempdir())/'novatech-cut-selftest-error.txt').write_text(tb,encoding='utf-8')
+        except Exception:
+            pass
         traceback.print_exc()
         return 2
     return 0
