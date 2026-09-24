@@ -1,12 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules
-hiddenimports = collect_submodules('ezdxf') + collect_submodules('shapely')
+
 a = Analysis(
-    ['novatech_cut/__main__.py'],
-    pathex=['.'],
+    ['../novatech_cut/__main__.py'],
+    pathex=['..'],
     binaries=[],
-    datas=[('THIRD_PARTY_NOTICES.md','.'),('LICENSE.txt','.')],
-    hiddenimports=hiddenimports,
+    datas=[('../THIRD_PARTY_NOTICES.md','.'),('../LICENSE.txt','.')],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -14,9 +13,13 @@ a = Analysis(
     noarchive=False,
     optimize=1,
 )
-pyz=PYZ(a.pure)
-exe=EXE(
-    pyz,a.scripts,a.binaries,a.datas,[],
+pyz = PYZ(a.pure)
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
     name='NovatechCut',
     debug=False,
     bootloader_ignore_signals=False,
