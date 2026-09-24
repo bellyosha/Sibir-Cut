@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 a = Analysis(
-    ['../novatech_cut/__main__.py'],
+    ['../launcher.py'],
     pathex=['..'],
     binaries=[],
     datas=[('../THIRD_PARTY_NOTICES.md','.'),('../LICENSE.txt','.')],
-    hiddenimports=[],
+    hiddenimports=['novatech_cut.selftest','novatech_cut.app'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -26,7 +26,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
-    disable_windowed_traceback=False,
+    disable_windowed_traceback=True,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
