@@ -1,12 +1,46 @@
+    def draw(self):
+        c=self.canvas;c.delete('all');ox,oy=self.origin;z=self.zoom;p=self.project.printer
+        def pt(x,y):return ox+x*z, oy+(p.bed_height-y)*z
+        x0,y0=pt(0,p.bed_height);x1,y1=pt(p.bed_width,0);c.create_rectangle(x0,y0,x1,y1,fill='white',outline='#64748b',width=2)
+        for x in range(0,257,10):
+            a=pt(x,0);b=pt(x,p.bed_height);c.create_line(*a,*b,fill='#e2e8f0')
+        for y in range(0,257,10):
+            a=pt(0,y);b=pt(p.bed_width,y);c.create_line(*a,*b,fill='#e2e8f0')
+        l,bm,r,t=p.safe_bounds
+        A=pt(0,p.bed_height);B=pt(p.bed_width,t);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
+        A=pt(0,bm);B=pt(p.bed_width,0);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
+        A=pt(0,t);B=pt(l,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
+        A=pt(r,t);B=pt(p.bed_width,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
+        a=pt(l,bm);bb=pt(r,t);c.create_rectangle(a[0],bb[1],bb[0],a[1],outline='#64748b',dash=(5,4),width=2)
+        if self._drag_active:
+            paths=[]
+            for obj in self.project.objects:paths.extend(transformed_paths(obj))
+        else:
+            paths=self.prepared_paths
+        prev=None
+        for idx,path in enumerate(paths,1):
+            if not path:continue
+            if prev is not None:
+                a=pt(*prev);bq=pt(*path[0]);c.create_line(*a,*bq,fill='#2563eb',dash=(4,3),width=1)
+            xy=[];step=max(1,len(path)//1200);sample=path[::step]
+            if path and sample[-1]!=path[-1]:sample=sample+[path[-1]]
+            for x,y in sample:xy+=pt(x,y)
+            if len(xy)>=4:c.create_line(*xy,fill='#dc2626',width=2)
+            if len(path)>=2 and idx<=300:
+                q0=pt(*path[0]);q1=pt(*path[min(1,len(path)-1)]);c.create_line(*q0,*q1,fill='#dc2626',width=2,arrow='last')
                 c.create_text(q0[0]+5,q0[1]-5,text=str(idx),anchor='sw',fill='#7f1d1d')
             prev=path[-1]
-        c.create_text(ox+8,oy+8,text='Bambu Lab A1 — 256 × 256 мм',anchor='nw',fill='#334155')
+        sel=self.current_index()
+        if sel is not None and sel<len(self.project.objects):
+            x0s,y0s,x1s,y1s=self._object_bounds(self.project.objects[sel]);A=pt(x0s,y1s);B=pt(x1s,y0s)
+            c.create_rectangle(A[0],A[1],B[0],B[1],outline='#16a34a',dash=(6,3),width=2)
+        c.create_text(ox+8,oy+8,text='Bambu Lab A1 — 256 × 256 мм   •   ЛКМ: выбрать и перетащить',anchor='nw',fill='#334155')
     def update_status(self):
         try:
             if self.prepare_error:
                 self.status.config(text=self.prepare_error);self.warn.config(text='');return
             paths=self.prepared_paths;b=bbox(paths);length=sum(path_length(p) for p in paths);m=self.project.material
-            est=length/max(0.1,m.work_speed)*max(1,m.passes);self.status.config(text=f'Контуров: {len(paths)}   Рез: {length:.1f} мм   ≈ {est:.0f} с   Границы: {b[0]:.1f},{b[1]:.1f} — {b[2]:.1f},{b[3]:.1f} мм')
+            est=length/max(0.1,m.work_speed)*max(1,m.passes);kind='рисования' if m.mode=='Рисование' else 'реза';self.status.config(text=f'Траекторий: {len(paths)}   Длина {kind}: {length:.1f} мм   ≈ {est:.0f} с   Границы: {b[0]:.1f},{b[1]:.1f} — {b[2]:.1f},{b[3]:.1f} мм')
             l,bb,r,t=self.project.printer.safe_bounds;bad=bool(paths) and (b[0]<l or b[1]<bb or b[2]>r or b[3]>t);self.warn.config(text='⚠ Выход за безопасную область' if bad else '')
         except Exception as e:self.status.config(text=str(e));self.warn.config(text='')
     def save_project(self):
@@ -57,21 +91,43 @@
             typ,a,b=seq[state['i']];A=pt(*a);B=pt(*b);self.canvas.create_line(*A,*B,fill='#2563eb' if typ=='travel' else '#dc2626',width=3);self.canvas.delete('tool');x,y=B;self.canvas.create_oval(x-4,y-4,x+4,y+4,fill='#16a34a',outline='',tags='tool');state['i']+=1;self.after(35,step)
         step()
 
-    def calibrate(self):
-        w=tk.Toplevel(self);w.title('Мастер калибровки A1 + UMTS');w.geometry('620x520');w.transient(self);w.grab_set()
-        txt=tk.Text(w,wrap='word',font=('Segoe UI',10));txt.pack(fill='both',expand=True,padx=10,pady=10)
-        txt.insert('1.0','''Мастер калибровки Novatech Cut
+    def _placement_ok(self):
+        if not self.project.objects:return False,'Нет объектов'
+        raw=[]
+        for obj in self.project.objects:raw.extend(transformed_paths(obj))
+        if not raw:return False,'Нет геометрии'
+        x0,y0,x1,y1=bbox(raw);l,b,r,t=self.project.printer.safe_bounds
+        ok=x0>=l-1e-6 and y0>=b-1e-6 and x1<=r+1e-6 and y1<=t+1e-6
+        return ok,f'Объект: X {x0:.1f}…{x1:.1f} мм, Y {y0:.1f}…{y1:.1f} мм; безопасная зона X {l:.1f}…{r:.1f}, Y {b:.1f}…{t:.1f}'
 
-1. Снимите UMTS. Любой homing выполняется только без режущего модуля.
-2. Выполните штатный homing на принтере.
-3. Закрепите материал/коврик.
-4. Установите UMTS только после остановки головки.
-5. Определите смещение X/Y инструмента относительно сопла.
-6. Найдите безопасную Z-высоту, затем рабочую Z маленькими шагами.
-7. Выполните воздушный квадрат и круг.
-8. Затем тест Z на ненужном материале.
+    def launch_wizard(self):
+        old=getattr(self,'_wizard',None)
+        if old is not None:
+            try:
+                if old.winfo_exists():old.lift();return
+            except Exception:pass
+        w=tk.Toplevel(self);self._wizard=w;w.title('Мастер подготовки и запуска — Novatech Cut');w.geometry('780x650');w.minsize(700,560);w.transient(self)
+        step={'i':0};titles=['Файл','Размещение','Режим и материал','Калибровка A1 + UMTS','Воздушный тест','Экспорт и запуск']
+        top=ttk.Frame(w,padding=12);top.pack(fill='x');step_label=ttk.Label(top,text='',style='Title.TLabel');step_label.pack(anchor='w');desc=ttk.Label(top,text='',wraplength=730);desc.pack(anchor='w',pady=(4,0))
+        body=ttk.Frame(w,padding=(16,8));body.pack(fill='both',expand=True)
+        nav=ttk.Frame(w,padding=12);nav.pack(fill='x');back=ttk.Button(nav,text='← Назад');back.pack(side='left');nextb=ttk.Button(nav,text='Далее →');nextb.pack(side='right');ttk.Button(nav,text='Закрыть',command=w.destroy).pack(side='right',padx=8)
 
-Это приложение не отправляет команды на принтер напрямую. Введите измеренные значения ниже. Экспорт станет доступен только после явного подтверждения.
-''');txt.config(state='disabled')
-        frm=ttk.Frame(w,padding=10);frm.pack(fill='x');vx=tk.DoubleVar(value=self.project.printer.tool_offset_x);vy=tk.DoubleVar(value=self.project.printer.tool_offset_y);vw=tk.DoubleVar(value=self.project.printer.work_z);vs=tk.DoubleVar(value=self.project.printer.safe_z)
-        for lab,var in [('Offset X, мм',vx),('Offset Y, мм',vy),('Рабочая Z',vw),('Безопасная Z',vs)]:
+        m=self.project.material
+        wm=tk.StringVar(value=m.mode);wmat=tk.StringVar(value=m.name);wstyle=tk.StringVar(value=getattr(m,'drawing_style','Контур + заливка'))
+        wspacing=tk.DoubleVar(value=getattr(m,'fill_spacing',1.0));wangle=tk.DoubleVar(value=getattr(m,'fill_angle',45.0));wcross=tk.BooleanVar(value=getattr(m,'fill_crosshatch',False));winset=tk.DoubleVar(value=getattr(m,'fill_inset',0.2))
+        wpasses=tk.IntVar(value=m.passes);wspeed=tk.DoubleVar(value=m.work_speed);wblade=tk.DoubleVar(value=m.blade_offset);wover=tk.DoubleVar(value=m.overcut)
+
+        def clear():
+            for child in body.winfo_children():child.destroy()
+        def note(text,kind='normal'):
+            fg={'ok':'#15803d','warn':'#b45309','bad':'#b91c1c'}.get(kind,'#334155')
+            ttk.Label(body,text=text,wraplength=720,foreground=fg,justify='left').pack(fill='x',anchor='w',pady=6)
+        def load_material(event=None):
+            prof=next((x for x in DEFAULT_MATERIALS if x.name==wmat.get()),None)
+            if not prof:return
+            wm.set(prof.mode);wpasses.set(prof.passes);wspeed.set(prof.work_speed);wblade.set(prof.blade_offset);wover.set(prof.overcut);wstyle.set(getattr(prof,'drawing_style','Контур + заливка'));wspacing.set(getattr(prof,'fill_spacing',1.0));wangle.set(getattr(prof,'fill_angle',45.0));wcross.set(getattr(prof,'fill_crosshatch',False));winset.set(getattr(prof,'fill_inset',0.2))
+            if step['i']==2:render()
+        def apply_settings():
+            prof=next((x for x in DEFAULT_MATERIALS if x.name==wmat.get()),None)
+            if prof:self.project.material=MaterialProfile.from_dict(prof.to_dict())
+            mm=self.project.material;mm.name=wmat.get();mm.mode=wm.get();mm.passes=max(1,wpasses.get());mm.work_speed=max(0.1,wspeed.get());mm.blade_offset=max(0,wblade.get());mm.overcut=max(0,wover.get());mm.drawing_style=wstyle.get();mm.fill_spacing=max(0.1,wspacing.get());mm.fill_angle=wangle.get();mm.fill_crosshatch=bool(wcross.get());mm.fill_inset=max(0,winset.get())
