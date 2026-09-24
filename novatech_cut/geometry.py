@@ -264,10 +264,14 @@ def _trace_skeleton(skel, min_points=3):
     return paths
 
 def load_raster(filename: str, threshold=128, invert=False, min_area=10, external_only=True, smoothing=1.0, centerline=False) -> List[Path]:
-    import cv2
-    img=cv2.imread(filename,cv2.IMREAD_GRAYSCALE)
+    import cv2, numpy as np
+    try:
+        data=np.fromfile(filename,dtype=np.uint8)
+        img=cv2.imdecode(data,cv2.IMREAD_GRAYSCALE) if data.size else None
+    except Exception as exc:
+        raise ValueError(f'Не удалось прочитать изображение: {exc}') from exc
     if img is None:
-        raise ValueError('Не удалось открыть изображение')
+        raise ValueError('Не удалось декодировать изображение. Проверьте реальный формат файла.')
 
     # Very large photos used to freeze the GUI and could create hundreds of
     # thousands of points. Work on a bounded raster while preserving the
