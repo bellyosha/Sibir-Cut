@@ -9,7 +9,7 @@ from .gcode import generate_gcode, GCodeError
 from .pack3mf import build_gcode_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.2.3'
+APP_TITLE='Novatech Cut 0.2.4'
 
 class App(tk.Tk):
     def __init__(self):
@@ -145,3 +145,13 @@ class App(tk.Tk):
             try:on_success(result)
             except Exception as exc:
                 messagebox.showerror(title,str(exc),parent=self)
+        threading.Thread(target=worker,daemon=True).start()
+        self.after(50,poll)
+
+    def do_import(self):
+        f=filedialog.askopenfilename(filetypes=[('Поддерживаемые','*.svg *.dxf *.png *.jpg *.jpeg *.bmp *.webp'),('Все файлы','*.*')])
+        if not f:return
+        try:
+            detected_kind=detect_import_kind(f)
+        except Exception as exc:
+            messagebox.showerror('Импорт',str(exc),parent=self);return
