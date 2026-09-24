@@ -54,9 +54,13 @@
         self.after(50,poll)
 
     def do_import(self):
-        f=filedialog.askopenfilename(filetypes=[('Поддерживаемые','*.svg *.dxf *.png *.jpg *.jpeg *.bmp'),('Все файлы','*.*')])
+        f=filedialog.askopenfilename(filetypes=[('Поддерживаемые','*.svg *.dxf *.png *.jpg *.jpeg *.bmp *.webp'),('Все файлы','*.*')])
         if not f:return
-        opts={};is_raster=Path(f).suffix.lower() in ('.png','.jpg','.jpeg','.bmp')
+        try:
+            detected_kind=detect_import_kind(f)
+        except Exception as exc:
+            messagebox.showerror('Импорт',str(exc),parent=self);return
+        opts={};is_raster=detected_kind=='raster'
         if is_raster:
             th=simpledialog.askinteger('Векторизация','Порог 0–255:',initialvalue=128,minvalue=0,maxvalue=255,parent=self)
             if th is None:return
