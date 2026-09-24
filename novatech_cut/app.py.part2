@@ -33,23 +33,25 @@
         bar=ttk.Progressbar(w,mode='indeterminate');bar.pack(fill='x',padx=16,pady=14);bar.start(12)
         w.protocol('WM_DELETE_WINDOW',lambda:None)
 
+        results=queue.Queue(maxsize=1)
         def worker():
-            try:
-                result=fn();error=None
+            try:results.put((fn(),None))
+            except Exception as exc:results.put((None,exc))
+        def poll():
+            try:result,error=results.get_nowait()
+            except queue.Empty:
+                self.after(50,poll);return
+            self._busy=False;self._busy_win=None
+            try:bar.stop();w.destroy()
+            except Exception:pass
+            if error is not None:
+                messagebox.showerror(title,str(error),parent=self)
+                return
+            try:on_success(result)
             except Exception as exc:
-                result=None;error=exc
-            def finish():
-                self._busy=False;self._busy_win=None
-                try:bar.stop();w.destroy()
-                except Exception:pass
-                if error is not None:
-                    messagebox.showerror(title,str(error),parent=self)
-                    return
-                try:on_success(result)
-                except Exception as exc:
-                    messagebox.showerror(title,str(exc),parent=self)
-            self.after(0,finish)
+                messagebox.showerror(title,str(exc),parent=self)
         threading.Thread(target=worker,daemon=True).start()
+        self.after(50,poll)
 
     def do_import(self):
         f=filedialog.askopenfilename(filetypes=[('Поддерживаемые','*.svg *.dxf *.png *.jpg *.jpeg *.bmp'),('Все файлы','*.*')])
@@ -72,7 +74,11 @@
             self.checkpoint();x0,y0,x1,y1=bbox(paths)
             o=SceneObject(Path(f).name,paths,x=10-x0,y=10-y0,source=f)
             self.project.objects.append(o)
-            self.refresh_all()
+            def prepared(paths2):
+                self.prepared_paths=paths2;self.prepare_error=None
+                self.listbox.delete(0,'end');[self.listbox.insert('end',obj.name) for obj in self.project.objects]
+                self.refresh_fields();self.draw();self.update_status()
+            self._run_background('Подготовка траектории…',lambda:prepare_paths(self.project.objects,self.project.material),prepared)
 
         self._run_background('Преобразование изображения…',lambda:import_paths(f,**opts),imported)
     def preview_paths_modal(self, paths):
