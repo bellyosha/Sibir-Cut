@@ -1,30 +1,3 @@
-            self._air_test_exported=False;self.refresh_all()
-        def center_selected():
-            if not self.project.objects:return
-            if self.current_index() is None:self.listbox.selection_set(0);self.listbox.activate(0)
-            self.align('center');render()
-        def open_export_folder():
-            if not self.last_export_path:
-                messagebox.showinfo('Папка','Сначала экспортируйте файл.',parent=w);return
-            folder=str(Path(self.last_export_path).parent)
-            try:os.startfile(folder)
-            except Exception as exc:messagebox.showerror('Папка',str(exc),parent=w)
-
-        def render():
-            clear();i=step['i'];step_label.config(text=f'Шаг {i+1} из {len(titles)} — {titles[i]}')
-            back.config(state='normal' if i>0 else 'disabled');nextb.config(text='Готово' if i==len(titles)-1 else 'Далее →')
-            if i==0:
-                desc.config(text='Сначала нужен объект для резки или рисования.')
-                if self.project.objects:note(f'✓ Загружено объектов: {len(self.project.objects)}','ok')
-                else:note('Файл ещё не загружен. Нажмите «Импорт» в главном окне или кнопку ниже.','bad')
-                ttk.Button(body,text='Импортировать файл…',command=self.do_import).pack(anchor='w',pady=10)
-                note('Для растровой картинки выбирайте «Нет» на вопрос про осевые линии, если нужно вырезать контур или полностью закрашивать фигуру.')
-            elif i==1:
-                desc.config(text='Разместите объект на столе. Теперь его можно хватать левой кнопкой мыши прямо в главном координатном поле и перетаскивать.')
-                ok,msg=self._placement_ok();note(('✓ ' if ok else '⚠ ')+msg,'ok' if ok else 'warn')
-                note('Окно мастера не блокирует главное окно: потяните объект мышкой. Зелёная пунктирная рамка показывает выбранный объект. Точные X/Y остаются слева.')
-                ttk.Button(body,text='Поставить выбранный объект по центру',command=center_selected).pack(anchor='w',pady=8)
-                ttk.Button(body,text='Обновить проверку размещения',command=render).pack(anchor='w')
             elif i==2:
                 desc.config(text='Выберите, что делает инструмент. Для ножа нужна «Резка» — только границы. Для ручки/маркера «Рисование» может обводить и закрашивать всю площадь.')
                 grid=ttk.Frame(body);grid.pack(fill='x',anchor='n')
@@ -84,29 +57,66 @@
         w.protocol('WM_DELETE_WINDOW',closed);render()
 
     def calibrate(self):
-        w=tk.Toplevel(self);w.title('Мастер калибровки A1 + UMTS');w.geometry('620x520');w.transient(self);w.grab_set()
-        txt=tk.Text(w,wrap='word',font=('Segoe UI',10));txt.pack(fill='both',expand=True,padx=10,pady=10)
+        w=tk.Toplevel(self);w.title('Мастер калибровки A1 + UMTS')
+        screen_h=max(600,self.winfo_screenheight());height=min(620,max(500,screen_h-140))
+        w.geometry(f'720x{height}');w.minsize(620,480);w.transient(self);w.grab_set()
+        w.grid_columnconfigure(0,weight=1);w.grid_rowconfigure(0,weight=1)
+
+        content=ttk.Frame(w,padding=(10,10,10,0));content.grid(row=0,column=0,sticky='nsew')
+        content.grid_columnconfigure(0,weight=1);content.grid_rowconfigure(0,weight=1)
+
+        text_frame=ttk.Frame(content);text_frame.grid(row=0,column=0,sticky='nsew')
+        text_frame.grid_columnconfigure(0,weight=1);text_frame.grid_rowconfigure(0,weight=1)
+        txt=tk.Text(text_frame,wrap='word',font=('Segoe UI',10),height=12)
+        sb=ttk.Scrollbar(text_frame,orient='vertical',command=txt.yview);txt.configure(yscrollcommand=sb.set)
+        txt.grid(row=0,column=0,sticky='nsew');sb.grid(row=0,column=1,sticky='ns')
         txt.insert('1.0','''Мастер калибровки Novatech Cut
 
 1. Снимите UMTS. Любой homing выполняется только без режущего модуля.
 2. Выполните штатный homing на принтере.
 3. Закрепите материал/коврик.
-4. Установите UMTS только после остановки головки.
-5. Определите смещение X/Y инструмента относительно сопла.
-6. Найдите безопасную Z-высоту, затем рабочую Z маленькими шагами.
-7. Выполните воздушный квадрат и круг.
-8. Затем тест Z на ненужном материале.
+4. После остановки головки установите UMTS.
+5. Измерьте смещение X/Y кончика ножа или ручки относительно сопла.
+6. Найдите безопасную Z — инструмент гарантированно не касается материала.
+7. Найдите рабочую Z маленькими шагами на ненужном материале.
+8. Сохраните измеренные значения. После этого «Мастер подготовки и запуска» проведёт через воздушный тест и рабочий экспорт.
 
-Это приложение не отправляет команды на принтер напрямую. Введите измеренные значения ниже. Экспорт станет доступен только после явного подтверждения.
+Offset X/Y — реальное смещение инструмента от сопла.
+Рабочая Z — высота контакта инструмента с материалом.
+Безопасная Z — высота холостого перемещения без касания.
+
+Не копируйте чужие значения Z: они зависят от конкретного UMTS, установки инструмента, материала и коврика.
 ''');txt.config(state='disabled')
-        frm=ttk.Frame(w,padding=10);frm.pack(fill='x');vx=tk.DoubleVar(value=self.project.printer.tool_offset_x);vy=tk.DoubleVar(value=self.project.printer.tool_offset_y);vw=tk.DoubleVar(value=self.project.printer.work_z);vs=tk.DoubleVar(value=self.project.printer.safe_z)
-        for lab,var in [('Offset X, мм',vx),('Offset Y, мм',vy),('Рабочая Z',vw),('Безопасная Z',vs)]:
-            r=ttk.Frame(frm);r.pack(fill='x');ttk.Label(r,text=lab,width=18).pack(side='left');ttk.Entry(r,textvariable=var).pack(side='left',fill='x',expand=True)
-        ok=tk.BooleanVar(False);ttk.Checkbutton(frm,text='Я физически измерил X/Y/Z и понимаю, что неверная рабочая Z может повредить стол',variable=ok).pack(anchor='w',pady=8)
+
+        frm=ttk.LabelFrame(content,text='Измеренные значения',padding=10);frm.grid(row=1,column=0,sticky='ew',pady=(10,6));frm.grid_columnconfigure(1,weight=1)
+        vx=tk.DoubleVar(value=self.project.printer.tool_offset_x);vy=tk.DoubleVar(value=self.project.printer.tool_offset_y);vw=tk.DoubleVar(value=self.project.printer.work_z);vs=tk.DoubleVar(value=self.project.printer.safe_z)
+        for row,(lab,var) in enumerate([('Offset X, мм',vx),('Offset Y, мм',vy),('Рабочая Z',vw),('Безопасная Z',vs)]):
+            ttk.Label(frm,text=lab).grid(row=row,column=0,sticky='w',padx=(0,10),pady=3)
+            ttk.Entry(frm,textvariable=var).grid(row=row,column=1,sticky='ew',pady=3)
+
+        ok=tk.BooleanVar(False)
+        ttk.Checkbutton(
+            content,
+            text='Я физически измерил X/Y/Z и понимаю, что неверная рабочая Z может повредить стол',
+            variable=ok
+        ).grid(row=2,column=0,sticky='w',pady=(2,8))
+
+        buttons=ttk.Frame(w,padding=10);buttons.grid(row=1,column=0,sticky='ew')
         def apply():
-            if not ok.get():messagebox.showwarning('Калибровка','Подтвердите, что значения измерены на вашем модуле, а не взяты наугад.',parent=w);return
-            p=self.project.printer;p.tool_offset_x=vx.get();p.tool_offset_y=vy.get();p.work_z=vw.get();p.safe_z=vs.get();p.calibrated=True;self.project.material.work_z=p.work_z;self.project.material.safe_z=p.safe_z;w.destroy();self.refresh_all()
-        ttk.Button(frm,text='Сохранить калибровку',command=apply).pack(fill='x')
+            if not ok.get():
+                messagebox.showwarning('Калибровка','Подтвердите, что значения измерены на вашем модуле, а не взяты наугад.',parent=w);return
+            try:
+                safe_z=float(vs.get());work_z=float(vw.get())
+                if safe_z<=work_z:
+                    if not messagebox.askyesno('Проверка Z','Безопасная Z не выше рабочей Z. Вы уверены, что для вашей механики это правильно?',parent=w):
+                        return
+                p=self.project.printer;p.tool_offset_x=float(vx.get());p.tool_offset_y=float(vy.get());p.work_z=work_z;p.safe_z=safe_z;p.calibrated=True
+                self.project.material.work_z=p.work_z;self.project.material.safe_z=p.safe_z;self._air_test_exported=False
+                w.destroy();self.refresh_all()
+            except Exception as exc:
+                messagebox.showerror('Калибровка',str(exc),parent=w)
+        ttk.Button(buttons,text='Отмена',command=w.destroy).pack(side='right')
+        ttk.Button(buttons,text='Сохранить калибровку',style='Danger.TButton',command=apply).pack(side='right',padx=(0,8))
     def export(self,air=False,show_message=True):
         try:
             self.sync_material();paths=prepare_paths(self.project.objects,self.project.material)
