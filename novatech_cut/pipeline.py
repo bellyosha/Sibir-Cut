@@ -13,9 +13,10 @@ def detect_import_kind(filename):
     except OSError as exc:
         raise ValueError(f'Не удалось прочитать файл: {exc}') from exc
 
-    low=head.lstrip(b'\xef\xbb\xbf\x00\t\r\n ').lower()
-    if b'<svg' in low:
-        return 'svg'
+    # Binary image signatures MUST be checked before looking for "<svg".
+    # Modern PNG/JUMBF metadata can legitimately embed SVG snippets
+    # (for example image/svg+xml thumbnails), which does not make the
+    # container itself an SVG file.
     if head.startswith(b'\x89PNG\r\n\x1a\n'):
         return 'raster'
     if head.startswith(b'\xff\xd8\xff'):
@@ -26,6 +27,11 @@ def detect_import_kind(filename):
         return 'raster'
     if len(head)>=12 and head[:4]==b'RIFF' and head[8:12]==b'WEBP':
         return 'raster'
+
+    low=head.lstrip(b'\xef\xbb\xbf\x00\t\r\n ').lower()
+    # Treat as SVG only when the textual document starts with XML/SVG markup.
+    if low.startswith(b'<svg') or (low.startswith(b'<?xml') and b'<svg' in low):
+        return 'svg'
 
     ext=path.suffix.lower()
     if ext=='.dxf':
