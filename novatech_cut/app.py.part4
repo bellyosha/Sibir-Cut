@@ -1,33 +1,3 @@
-            elif i==3:
-                desc.config(text='Калибровка сообщает программе, где относительно сопла находится UMTS и на какой Z инструмент касается материала.')
-                p=self.project.printer
-                if p.calibrated:note(f'✓ Профиль откалиброван. Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}; рабочая Z={p.work_z:.2f}; безопасная Z={p.safe_z:.2f}.','ok')
-                else:note('Профиль ещё не откалиброван. Реальный экспорт заблокирован.','bad')
-                note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Безопасная Z — инструмент гарантированно не касается материала.\n• Рабочая Z — нож/ручка касается материала с нужным прижимом.\n\nUMTS должен быть СНЯТ во время homing. Значения Z нельзя угадывать: их определяют на конкретном модуле маленькими шагами.')
-                ttk.Button(body,text='Открыть мастер калибровки',command=self.calibrate).pack(anchor='w',pady=8);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
-            elif i==4:
-                desc.config(text='Сначала проверяем траекторию без касания материала. Это обязательный этап перед первым реальным запуском.')
-                if self._air_test_exported:note('✓ Воздушный тест для текущего задания сохранён.','ok')
-                else:note('Воздушный тест ещё не сохранён.','warn')
-                note('1. UMTS перед стартом файла должен быть снят.\n2. Запустите воздушный файл на A1.\n3. Принтер выполнит homing и встанет в парковку.\n4. На паузе установите UMTS и продолжите.\n5. Убедитесь, что инструмент нигде не касается стола и вся траектория остаётся в нужной зоне.')
-                def air():
-                    if self.export(air=True,show_message=False):messagebox.showinfo('Воздушный тест','Файл сохранён. Перенесите его на принтер и проверьте движение без касания материала.',parent=w);render()
-                ttk.Button(body,text='Сохранить файл воздушного теста…',command=air).pack(anchor='w',pady=8)
-            else:
-                desc.config(text='После успешного воздушного теста можно сформировать рабочий файл и запустить его на A1.')
-                note('В этой версии Novatech Cut готовит проверенный .gcode.3mf, но не отправляет его на принтер по сети автоматически.')
-                note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.3mf.\n2. Перенесите файл на microSD/локальный носитель, с которого A1 показывает задания.\n3. ПЕРЕД стартом снимите UMTS.\n4. Запустите файл: сначала выполняется homing без UMTS, затем головка паркуется.\n5. На первой паузе установите UMTS и продолжите.\n6. Выполнится резка/рисование без нагрева и экструзии.\n7. В конце головка поднимется и припаркуется; на второй паузе снимите UMTS, затем завершите задание.','warn')
-                def final_export():
-                    if not self._air_test_exported:
-                        if not messagebox.askyesno('Воздушный тест','Для текущего задания не отмечен сохранённый воздушный тест. Всё равно перейти к экспорту?',parent=w):return
-                    if self.export(air=False,show_message=False):messagebox.showinfo('Рабочий файл','Рабочий файл создан. Теперь перенесите его на принтер по инструкции в этом окне.',parent=w);render()
-                ttk.Button(body,text='Экспортировать рабочий .gcode.3mf…',style='Danger.TButton',command=final_export).pack(anchor='w',pady=8)
-                ttk.Button(body,text='Открыть папку последнего экспорта',command=open_export_folder).pack(anchor='w')
-        def go(delta):
-            i=step['i']
-            if delta>0:
-                if i==0 and not self.project.objects:messagebox.showwarning('Шаг 1','Сначала импортируйте хотя бы один объект.',parent=w);return
-                if i==1:
                     ok,msg=self._placement_ok()
                     if not ok:messagebox.showwarning('Размещение','Объект выходит за безопасную область. Перетащите его на поле или используйте кнопку центрирования.',parent=w);return
                 if i==2:
@@ -120,7 +90,6 @@ Esc — отмена
 
         w.bind('<Escape>',lambda e:w.destroy())
         w.bind('<Control-Return>',lambda e:apply())
-        w.bind('<Control-KP_Enter>',lambda e:apply())
     def export(self,air=False,show_message=True):
         try:
             self.sync_material();paths=prepare_paths(self.project.objects,self.project.material)
@@ -139,6 +108,47 @@ Esc — отмена
             return f
         except Exception as e:
             messagebox.showerror('Экспорт заблокирован',str(e));return None
+
+def calibration_gui_self_test():
+    """Create the calibration dialog and verify its critical controls exist."""
+    app=App()
+    app.withdraw()
+    try:
+        app.calibrate()
+        app.update_idletasks()
+        tops=[w for w in app.winfo_children() if isinstance(w,tk.Toplevel)]
+        if not tops:
+            raise RuntimeError('Calibration dialog was not created')
+        win=tops[-1]
+        texts=[]
+        entries=[]
+        checks=[]
+        def walk(widget):
+            for child in widget.winfo_children():
+                try:
+                    if isinstance(child,(ttk.Button,ttk.Label,ttk.Checkbutton)):
+                        texts.append(str(child.cget('text')))
+                    if isinstance(child,ttk.Entry): entries.append(child)
+                    if isinstance(child,ttk.Checkbutton): checks.append(child)
+                except Exception:
+                    pass
+                walk(child)
+        walk(win)
+        if 'Сохранить калибровку' not in texts:
+            raise RuntimeError('Save calibration button is missing')
+        if 'Отмена' not in texts:
+            raise RuntimeError('Cancel button is missing')
+        if len(entries)<4:
+            raise RuntimeError(f'Expected at least 4 calibration entries, got {len(entries)}')
+        if not checks:
+            raise RuntimeError('Calibration confirmation checkbox is missing')
+        win.destroy()
+        app.update_idletasks()
+        return True
+    finally:
+        try: app.destroy()
+        except Exception: pass
+
 
 def main():
     App().mainloop()
