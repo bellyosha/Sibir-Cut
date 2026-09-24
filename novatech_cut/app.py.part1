@@ -1,0 +1,77 @@
+from __future__ import annotations
+import json, math, os, sys, copy, tkinter as tk
+from tkinter import ttk, filedialog, messagebox, simpledialog
+from pathlib import Path
+from .models import Project, SceneObject, DEFAULT_MATERIALS, MaterialProfile
+from .pipeline import import_paths, prepare_paths
+from .geometry import bbox, path_length
+from .gcode import generate_gcode, GCodeError
+from .pack3mf import build_gcode_3mf
+from .projectio import save_project, load_project
+
+APP_TITLE='Novatech Cut 0.1.0'
+
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__(); self.title(APP_TITLE); self.geometry('1400x850'); self.minsize(1050,680)
+        self.project=Project();self.current_file=None;self.zoom=2.2;self.origin=(28,28);self.history=[];self.future=[]
+        self._style();self._build();self.refresh_all()
+    def _style(self):
+        s=ttk.Style(self); 
+        try:s.theme_use('clam')
+        except:pass
+        s.configure('TButton',padding=6);s.configure('Danger.TButton',padding=9,font=('Segoe UI',10,'bold'))
+        s.configure('Title.TLabel',font=('Segoe UI',12,'bold'))
+    def _build(self):
+        top=ttk.Frame(self,padding=8);top.pack(fill='x')
+        for text,cmd in [('Импорт',self.do_import),('Открыть проект',self.open_project),('Сохранить',self.save_project),('Отмена',self.undo),('Повтор',self.redo),('Профиль принтера',self.printer_profile),('Калибровка',self.calibrate),('Анимация',self.animate_preview)]:
+            ttk.Button(top,text=text,command=cmd).pack(side='left',padx=3)
+        ttk.Button(top,text='−',width=3,command=lambda:self.set_zoom(self.zoom/1.2)).pack(side='right');ttk.Button(top,text='+',width=3,command=lambda:self.set_zoom(self.zoom*1.2)).pack(side='right')
+        main=ttk.Panedwindow(self,orient='horizontal');main.pack(fill='both',expand=True,padx=8,pady=(0,8))
+        left=ttk.Frame(main,padding=8);center=ttk.Frame(main,padding=4);right=ttk.Frame(main,padding=8);main.add(left,weight=1);main.add(center,weight=4);main.add(right,weight=2)
+        ttk.Label(left,text='Объекты',style='Title.TLabel').pack(anchor='w');self.listbox=tk.Listbox(left,exportselection=False);self.listbox.pack(fill='both',expand=True,pady=6);self.listbox.bind('<<ListboxSelect>>',lambda e:self.load_obj_fields())
+        tf=ttk.LabelFrame(left,text='Трансформация',padding=6);tf.pack(fill='x')
+        self.vars={k:tk.DoubleVar() for k in ('x','y','scale','rotation')};self.vars['scale'].set(1)
+        for k,label in [('x','X, мм'),('y','Y, мм'),('scale','Масштаб'),('rotation','Поворот, °')]:
+            row=ttk.Frame(tf);row.pack(fill='x');ttk.Label(row,text=label,width=12).pack(side='left');ttk.Entry(row,textvariable=self.vars[k],width=10).pack(side='right')
+        ttk.Button(tf,text='Применить',command=self.apply_transform).pack(fill='x',pady=4)
+        rr=ttk.Frame(tf);rr.pack(fill='x');ttk.Button(rr,text='Зеркало X',command=lambda:self.mirror('x')).pack(side='left',expand=True,fill='x');ttk.Button(rr,text='Зеркало Y',command=lambda:self.mirror('y')).pack(side='left',expand=True,fill='x')
+        ar=ttk.Frame(tf);ar.pack(fill='x',pady=(4,0));ttk.Button(ar,text='По центру',command=lambda:self.align('center')).pack(side='left',expand=True,fill='x');ttk.Button(ar,text='К левому',command=lambda:self.align('left')).pack(side='left',expand=True,fill='x')
+        ar2=ttk.Frame(tf);ar2.pack(fill='x');ttk.Button(ar2,text='Дублировать…',command=self.duplicate_many).pack(side='left',expand=True,fill='x');ttk.Button(ar2,text='Удалить',command=self.delete).pack(side='left',expand=True,fill='x')
+        self.canvas=tk.Canvas(center,bg='#f2f4f7',highlightthickness=0);self.canvas.pack(fill='both',expand=True);self.canvas.bind('<Configure>',lambda e:self.draw());self.canvas.bind('<MouseWheel>',self.on_wheel)
+        ttk.Label(right,text='Параметры задания',style='Title.TLabel').pack(anchor='w')
+        self.material_var=tk.StringVar(value=self.project.material.name);cb=ttk.Combobox(right,textvariable=self.material_var,values=[m.name for m in DEFAULT_MATERIALS],state='readonly');cb.pack(fill='x',pady=5);cb.bind('<<ComboboxSelected>>',lambda e:self.select_material())
+        self.mode=tk.StringVar();self.passes=tk.IntVar();self.work_speed=tk.DoubleVar();self.travel_speed=tk.DoubleVar();self.work_z=tk.DoubleVar();self.safe_z=tk.DoubleVar();self.blade_offset=tk.DoubleVar();self.overcut=tk.DoubleVar()
+        for label,var in [('Режим',self.mode),('Проходов',self.passes),('Рабочая скорость, мм/с',self.work_speed),('Холостой ход, мм/с',self.travel_speed),('Рабочая высота Z',self.work_z),('Безопасная высота Z',self.safe_z),('Blade offset, мм',self.blade_offset),('Overcut, мм',self.overcut)]:
+            r=ttk.Frame(right);r.pack(fill='x',pady=2);ttk.Label(r,text=label).pack(anchor='w');ttk.Entry(r,textvariable=var).pack(fill='x')
+        ttk.Label(right,text='⚠ Z задаёт глубину/прижим механического инструмента.\nНеверное значение может повредить стол.',foreground='#b45309',wraplength=300).pack(fill='x',pady=8)
+        self.calib_label=ttk.Label(right,text='');self.calib_label.pack(fill='x',pady=5)
+        ttk.Button(right,text='Воздушный тест',command=lambda:self.export(air=True)).pack(fill='x',pady=5)
+        ttk.Button(right,text='Проверить и экспортировать',style='Danger.TButton',command=lambda:self.export(air=False)).pack(fill='x',pady=5)
+        bottom=ttk.Frame(self,padding=(10,4));bottom.pack(fill='x');self.status=ttk.Label(bottom,text='');self.status.pack(side='left');self.warn=ttk.Label(bottom,text='',foreground='#b45309');self.warn.pack(side='right')
+    def current_index(self):
+        s=self.listbox.curselection();return s[0] if s else None
+    def load_obj_fields(self):
+        i=self.current_index();
+        if i is None:return
+        o=self.project.objects[i]
+        for k in ('x','y','scale','rotation'):self.vars[k].set(getattr(o,'rotation_deg' if k=='rotation' else k))
+    def checkpoint(self):
+        self.history.append(copy.deepcopy(self.project));self.history=self.history[-50:];self.future.clear()
+    def undo(self):
+        if not self.history:return
+        self.future.append(copy.deepcopy(self.project));self.project=self.history.pop();self.refresh_all()
+    def redo(self):
+        if not self.future:return
+        self.history.append(copy.deepcopy(self.project));self.project=self.future.pop();self.refresh_all()
+    def apply_transform(self):
+        i=self.current_index();
+        if i is None:return
+        self.checkpoint();o=self.project.objects[i];o.x=self.vars['x'].get();o.y=self.vars['y'].get();o.scale=max(0.001,self.vars['scale'].get());o.rotation_deg=self.vars['rotation'].get();self.refresh_all()
+    def mirror(self,ax):
+        i=self.current_index();
+        if i is None:return
+        self.checkpoint();o=self.project.objects[i];setattr(o,'mirror_'+ax,not getattr(o,'mirror_'+ax));self.refresh_all()
+    def duplicate(self):
+        i=self.current_index();
+        if i is None:return
