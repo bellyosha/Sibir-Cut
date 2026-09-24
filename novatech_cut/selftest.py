@@ -74,6 +74,41 @@ def _file_detection_regression_test(td: str) -> None:
     if detect_import_kind(str(real_svg))!='svg': raise RuntimeError('SVG content detection failed')
     if not import_paths(str(real_svg)): raise RuntimeError('SVG content import failed')
 
+def _transparent_png_thread_regression_test(td: str) -> None:
+    import cv2
+    import numpy as np
+    import queue
+    import threading
+    import time
+
+    # Mimic transparent AI-generated PNGs: transparent pixels have black RGB,
+    # while only the drawn shape is opaque. This used to become a full black
+    # page when alpha was discarded.
+    rgba=np.zeros((1254,1254,4),dtype=np.uint8)
+    cv2.line(rgba,(120,1100),(1130,180),(0,0,0,255),48,cv2.LINE_AA)
+    cv2.circle(rgba,(650,620),260,(0,0,0,255),35,cv2.LINE_AA)
+    ok,encoded=cv2.imencode('.png',rgba)
+    if not ok: raise RuntimeError('Could not encode transparent PNG regression image')
+    p=Path(td)/'прозрачная картинка.png'
+    encoded.tofile(str(p))
+
+    result=queue.Queue(maxsize=1)
+    def worker():
+        try:
+            t0=time.monotonic()
+            paths=import_paths(str(p),threshold=128,invert=False,external_only=False,smoothing=1.0,centerline=True)
+            result.put((paths,time.monotonic()-t0,None))
+        except Exception as exc:
+            result.put((None,None,exc))
+    th=threading.Thread(target=worker,daemon=True)
+    th.start();th.join(10.0)
+    if th.is_alive():
+        raise RuntimeError('Transparent PNG centerline import did not finish within 10 seconds')
+    paths,elapsed,error=result.get_nowait()
+    if error is not None: raise error
+    if not paths: raise RuntimeError('Transparent PNG centerline import produced no paths')
+    if elapsed>10.0: raise RuntimeError(f'Transparent PNG centerline import too slow: {elapsed:.2f}s')
+
 def run_self_test() -> None:
     project = Project()
     project.printer.calibrated = True
@@ -94,6 +129,7 @@ def run_self_test() -> None:
             raise RuntimeError("Self-test 3MF inspection failed")
         _raster_regression_test(td)
         _file_detection_regression_test(td)
+        _transparent_png_thread_regression_test(td)
 
 def main() -> int:
     try:
