@@ -1,0 +1,76 @@
+                c.create_text(q0[0]+5,q0[1]-5,text=str(idx),anchor='sw',fill='#7f1d1d')
+            prev=path[-1]
+        c.create_text(ox+8,oy+8,text='Bambu Lab A1 — 256 × 256 мм',anchor='nw',fill='#334155')
+    def update_status(self):
+        try:
+            paths=prepare_paths(self.project.objects,self.project.material);b=bbox(paths);length=sum(path_length(p) for p in paths);m=self.project.material
+            est=length/max(0.1,m.work_speed)*max(1,m.passes);self.status.config(text=f'Контуров: {len(paths)}   Рез: {length:.1f} мм   ≈ {est:.0f} с   Границы: {b[0]:.1f},{b[1]:.1f} — {b[2]:.1f},{b[3]:.1f} мм')
+            l,bb,r,t=self.project.printer.safe_bounds;bad=bool(paths) and (b[0]<l or b[1]<bb or b[2]>r or b[3]>t);self.warn.config(text='⚠ Выход за безопасную область' if bad else '')
+        except Exception as e:self.status.config(text=str(e));self.warn.config(text='')
+    def save_project(self):
+        self.sync_material();f=self.current_file or filedialog.asksaveasfilename(defaultextension='.ncut',filetypes=[('Novatech Cut project','*.ncut')]);
+        if f:save_project(self.project,f);self.current_file=f
+    def open_project(self):
+        f=filedialog.askopenfilename(filetypes=[('Novatech Cut project','*.ncut')]);
+        if f:
+            try:self.project=load_project(f);self.current_file=f;self.refresh_all()
+            except Exception as e:messagebox.showerror('Проект',str(e))
+    def printer_profile(self):
+        w=tk.Toplevel(self);w.title('Профиль оборудования — Bambu Lab A1 + UMTS');w.geometry('760x760');w.transient(self);w.grab_set();p=self.project.printer
+        outer=ttk.Frame(w,padding=10);outer.pack(fill='both',expand=True);canvas=tk.Canvas(outer,highlightthickness=0);sb=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview);inner=ttk.Frame(canvas);inner.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')));canvas.create_window((0,0),window=inner,anchor='nw');canvas.configure(yscrollcommand=sb.set);canvas.pack(side='left',fill='both',expand=True);sb.pack(side='right',fill='y')
+        vals={}
+        fields=[('name','Название'),('bed_width','Ширина поля, мм'),('bed_height','Высота поля, мм'),('margin_left','Отступ слева'),('margin_right','Отступ справа'),('margin_bottom','Отступ снизу'),('margin_top','Отступ сверху'),('tool_offset_x','Смещение инструмента X'),('tool_offset_y','Смещение инструмента Y'),('work_z','Рабочая высота Z'),('safe_z','Безопасная высота Z'),('park_x','Парковка X'),('park_y','Парковка Y'),('max_work_speed','Макс. рабочая скорость'),('max_travel_speed','Макс. холостая скорость'),('max_accel','Макс. ускорение'),('min_z','Минимальный Z'),('max_z','Максимальный Z')]
+        for key,lab in fields:
+            r=ttk.Frame(inner);r.pack(fill='x',pady=2);ttk.Label(r,text=lab,width=29).pack(side='left');v=tk.StringVar(value=str(getattr(p,key)));ttk.Entry(r,textvariable=v).pack(side='left',fill='x',expand=True);vals[key]=v
+        ttk.Label(inner,text='Стартовый G-code',style='Title.TLabel').pack(anchor='w',pady=(10,2));start=tk.Text(inner,height=12,wrap='none');start.pack(fill='x');start.insert('1.0',p.start_template)
+        ttk.Label(inner,text='Конечный G-code',style='Title.TLabel').pack(anchor='w',pady=(10,2));end=tk.Text(inner,height=9,wrap='none');end.pack(fill='x');end.insert('1.0',p.end_template)
+        bar=ttk.Frame(inner);bar.pack(fill='x',pady=10)
+        def apply():
+            self.checkpoint()
+            try:
+                for k,v in vals.items():setattr(p,k,v.get() if k=='name' else float(v.get()))
+                p.start_template=start.get('1.0','end-1c');p.end_template=end.get('1.0','end-1c');p.calibrated=False
+                w.destroy();self.refresh_all()
+            except Exception as e:messagebox.showerror('Профиль',str(e),parent=w)
+        def exportp():
+            f=filedialog.asksaveasfilename(parent=w,defaultextension='.json',filetypes=[('JSON','*.json')]);
+            if f:Path(f).write_text(json.dumps(p.to_dict(),ensure_ascii=False,indent=2),encoding='utf-8')
+        def importp():
+            f=filedialog.askopenfilename(parent=w,filetypes=[('JSON','*.json')]);
+            if not f:return
+            try:self.checkpoint();self.project.printer=type(p).from_dict(json.loads(Path(f).read_text(encoding='utf-8')));w.destroy();self.refresh_all()
+            except Exception as e:messagebox.showerror('Профиль',str(e),parent=w)
+        ttk.Button(bar,text='Импорт профиля',command=importp).pack(side='left');ttk.Button(bar,text='Экспорт профиля',command=exportp).pack(side='left',padx=4);ttk.Button(bar,text='Применить (потребуется калибровка)',command=apply).pack(side='right')
+    def animate_preview(self):
+        try:paths=prepare_paths(self.project.objects,self.project.material)
+        except Exception:return
+        if not paths:return
+        self.draw();p=self.project.printer;ox,oy=self.origin;z=self.zoom
+        def pt(x,y):return ox+x*z,oy+(p.bed_height-y)*z
+        seq=[];prev=(p.park_x,p.park_y)
+        for path in paths:
+            seq.append(('travel',prev,path[0]));seq.extend(('cut',a,b) for a,b in zip(path,path[1:]));prev=path[-1]
+        state={'i':0}
+        def step():
+            if state['i']>=len(seq):return
+            typ,a,b=seq[state['i']];A=pt(*a);B=pt(*b);self.canvas.create_line(*A,*B,fill='#2563eb' if typ=='travel' else '#dc2626',width=3);self.canvas.delete('tool');x,y=B;self.canvas.create_oval(x-4,y-4,x+4,y+4,fill='#16a34a',outline='',tags='tool');state['i']+=1;self.after(35,step)
+        step()
+
+    def calibrate(self):
+        w=tk.Toplevel(self);w.title('Мастер калибровки A1 + UMTS');w.geometry('620x520');w.transient(self);w.grab_set()
+        txt=tk.Text(w,wrap='word',font=('Segoe UI',10));txt.pack(fill='both',expand=True,padx=10,pady=10)
+        txt.insert('1.0','''Мастер калибровки Novatech Cut
+
+1. Снимите UMTS. Любой homing выполняется только без режущего модуля.
+2. Выполните штатный homing на принтере.
+3. Закрепите материал/коврик.
+4. Установите UMTS только после остановки головки.
+5. Определите смещение X/Y инструмента относительно сопла.
+6. Найдите безопасную Z-высоту, затем рабочую Z маленькими шагами.
+7. Выполните воздушный квадрат и круг.
+8. Затем тест Z на ненужном материале.
+
+Это приложение не отправляет команды на принтер напрямую. Введите измеренные значения ниже. Экспорт станет доступен только после явного подтверждения.
+''');txt.config(state='disabled')
+        frm=ttk.Frame(w,padding=10);frm.pack(fill='x');vx=tk.DoubleVar(value=self.project.printer.tool_offset_x);vy=tk.DoubleVar(value=self.project.printer.tool_offset_y);vw=tk.DoubleVar(value=self.project.printer.work_z);vs=tk.DoubleVar(value=self.project.printer.safe_z)
+        for lab,var in [('Offset X, мм',vx),('Offset Y, мм',vy),('Рабочая Z',vw),('Безопасная Z',vs)]:
