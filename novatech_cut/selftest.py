@@ -8,7 +8,7 @@ from .geometry import path_length, load_raster
 from .gcode import generate_gcode, validate_gcode
 from .models import Project, SceneObject
 from .pack3mf import build_gcode_3mf, inspect_gcode_3mf
-from .pipeline import prepare_paths
+from .pipeline import prepare_paths, import_paths, detect_import_kind
 
 def _raster_regression_test(td: str) -> None:
     import cv2
@@ -44,6 +44,28 @@ def _raster_regression_test(td: str) -> None:
     if sum(len(p) for p in prepared)>120000:
         raise RuntimeError('Prepared raster path count exploded unexpectedly')
 
+def _file_detection_regression_test(td: str) -> None:
+    import cv2
+    import numpy as np
+    unicode_dir=Path(td)/'Тестовая папка'
+    unicode_dir.mkdir(parents=True,exist_ok=True)
+    img=np.full((180,240),255,dtype=np.uint8)
+    cv2.rectangle(img,(25,30),(190,140),0,-1)
+    ok,encoded=cv2.imencode('.png',img)
+    if not ok: raise RuntimeError('Could not encode PNG regression image')
+    png=unicode_dir/'картинка для резки.png'
+    encoded.tofile(str(png))
+    if detect_import_kind(str(png))!='raster': raise RuntimeError('PNG detection failed')
+    if not import_paths(str(png),threshold=128,external_only=True,smoothing=1.0): raise RuntimeError('Unicode raster import failed')
+    fake_svg=unicode_dir/'рисунок.svg'
+    fake_svg.write_bytes(png.read_bytes())
+    if detect_import_kind(str(fake_svg))!='raster': raise RuntimeError('Mislabeled PNG-as-SVG detection failed')
+    if not import_paths(str(fake_svg),threshold=128,external_only=True,smoothing=1.0): raise RuntimeError('Mislabeled PNG-as-SVG import failed')
+    real_svg=unicode_dir/'вектор.png'
+    real_svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="30mm" viewBox="0 0 40 30"><rect x="2" y="2" width="30" height="20"/></svg>',encoding='utf-8')
+    if detect_import_kind(str(real_svg))!='svg': raise RuntimeError('SVG content detection failed')
+    if not import_paths(str(real_svg)): raise RuntimeError('SVG content import failed')
+
 def run_self_test() -> None:
     project = Project()
     project.printer.calibrated = True
@@ -63,6 +85,7 @@ def run_self_test() -> None:
         if inspect_gcode_3mf(out) is not True:
             raise RuntimeError("Self-test 3MF inspection failed")
         _raster_regression_test(td)
+        _file_detection_regression_test(td)
 
 def main() -> int:
     try:
