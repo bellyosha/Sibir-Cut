@@ -82,6 +82,11 @@ class MaterialProfile:
     corner_extra: bool = True
     mirror_x: bool = False
     air_test_delta_z: float = 3.0
+    drawing_style: str = "Контур + заливка"
+    fill_spacing: float = 1.0
+    fill_angle: float = 45.0
+    fill_crosshatch: bool = False
+    fill_inset: float = 0.2
 
     def to_dict(self):
         return asdict(self)
@@ -98,8 +103,8 @@ DEFAULT_MATERIALS = [
     MaterialProfile("Винил с прорезанием подложки", passes=2, work_speed=20, blade_offset=0.25, overcut=0.60),
     MaterialProfile("Тонкий картон", passes=2, work_speed=18, blade_offset=0.30, overcut=0.65),
     MaterialProfile("Трафаретная пленка", passes=1, work_speed=25, blade_offset=0.25, overcut=0.45),
-    MaterialProfile("Рисование ручкой", mode="Рисование", passes=1, work_speed=40, blade_offset=0.0, overcut=0.0, corner_extra=False),
-    MaterialProfile("Рисование маркером", mode="Рисование", passes=1, work_speed=30, blade_offset=0.0, overcut=0.0, corner_extra=False),
+    MaterialProfile("Рисование ручкой", mode="Рисование", passes=1, work_speed=40, blade_offset=0.0, overcut=0.0, corner_extra=False, drawing_style="Контур + заливка", fill_spacing=0.8, fill_angle=45.0, fill_crosshatch=False, fill_inset=0.15),
+    MaterialProfile("Рисование маркером", mode="Рисование", passes=1, work_speed=30, blade_offset=0.0, overcut=0.0, corner_extra=False, drawing_style="Контур + заливка", fill_spacing=1.8, fill_angle=45.0, fill_crosshatch=True, fill_inset=0.25),
 ]
 
 
