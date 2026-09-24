@@ -1,7 +1,3 @@
-            paths=self.prepared_paths
-        prev=None
-        for idx,path in enumerate(paths,1):
-            if not path:continue
             if prev is not None:
                 a=pt(*prev);bq=pt(*path[0]);c.create_line(*a,*bq,fill='#2563eb',dash=(4,3),width=1)
             xy=[];step=max(1,len(path)//1200);sample=path[::step]
@@ -140,3 +136,9 @@
                 note('Окно мастера не блокирует главное окно: потяните объект мышкой. Зелёная пунктирная рамка показывает выбранный объект. Точные X/Y остаются слева.')
                 ttk.Button(body,text='Поставить выбранный объект по центру',command=center_selected).pack(anchor='w',pady=8)
                 ttk.Button(body,text='Обновить проверку размещения',command=render).pack(anchor='w')
+            elif i==2:
+                desc.config(text='Выберите, что делает инструмент. Для ножа нужна «Резка» — только границы. Для ручки/маркера «Рисование» может обводить и закрашивать всю площадь.')
+                grid=ttk.Frame(body);grid.pack(fill='x',anchor='n')
+                ttk.Label(grid,text='Профиль материала / инструмента').grid(row=0,column=0,sticky='w',pady=4);cb=ttk.Combobox(grid,textvariable=wmat,values=[x.name for x in DEFAULT_MATERIALS],state='readonly',width=34);cb.grid(row=0,column=1,sticky='ew',pady=4);cb.bind('<<ComboboxSelected>>',load_material)
+                ttk.Label(grid,text='Операция').grid(row=1,column=0,sticky='w',pady=4);ttk.Combobox(grid,textvariable=wm,values=['Резка','Рисование'],state='readonly').grid(row=1,column=1,sticky='ew',pady=4)
+                ttk.Label(grid,text='Рабочая скорость, мм/с').grid(row=2,column=0,sticky='w',pady=4);ttk.Entry(grid,textvariable=wspeed).grid(row=2,column=1,sticky='ew',pady=4)
