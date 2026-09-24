@@ -1,12 +1,50 @@
 from pathlib import Path
 from .geometry import load_svg, load_dxf, load_raster, remove_duplicate_paths, join_close_endpoints, simplify_path, optimize_order, compensate_dragknife, transformed_paths
 
+RASTER_EXTENSIONS={'.png','.jpg','.jpeg','.bmp','.webp'}
+
+def detect_import_kind(filename):
+    path=Path(filename)
+    if not path.exists() or not path.is_file():
+        raise ValueError(f'Файл не найден: {filename}')
+    try:
+        with open(path,'rb') as fh:
+            head=fh.read(16384)
+    except OSError as exc:
+        raise ValueError(f'Не удалось прочитать файл: {exc}') from exc
+
+    low=head.lstrip(b'\xef\xbb\xbf\x00\t\r\n ').lower()
+    if b'<svg' in low:
+        return 'svg'
+    if head.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'raster'
+    if head.startswith(b'\xff\xd8\xff'):
+        return 'raster'
+    if head.startswith(b'BM'):
+        return 'raster'
+    if head.startswith((b'GIF87a',b'GIF89a')):
+        return 'raster'
+    if len(head)>=12 and head[:4]==b'RIFF' and head[8:12]==b'WEBP':
+        return 'raster'
+
+    ext=path.suffix.lower()
+    if ext=='.dxf':
+        return 'dxf'
+    if ext=='.svg':
+        raise ValueError(
+            'Файл имеет расширение .svg, но внутри не найден SVG-код (<svg>). '
+            'Возможно, это изображение с неправильным расширением.'
+        )
+    if ext in RASTER_EXTENSIONS:
+        return 'raster'
+    raise ValueError(f'Неподдерживаемый или неопознанный формат: {ext or "без расширения"}')
+
 def import_paths(filename, **raster_opts):
-    ext=Path(filename).suffix.lower()
-    if ext=='.svg':return load_svg(filename)
-    if ext=='.dxf':return load_dxf(filename)
-    if ext in ('.png','.jpg','.jpeg','.bmp'):return load_raster(filename,**raster_opts)
-    raise ValueError(f'Неподдерживаемый формат: {ext}')
+    kind=detect_import_kind(filename)
+    if kind=='svg': return load_svg(filename)
+    if kind=='dxf': return load_dxf(filename)
+    if kind=='raster': return load_raster(filename,**raster_opts)
+    raise ValueError(f'Неизвестный тип файла: {kind}')
 
 def prepare_paths(objects, material, join_tolerance=0.05, simplify_tolerance=0.03):
     paths=[]
