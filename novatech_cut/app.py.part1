@@ -9,7 +9,7 @@ from .gcode import generate_gcode, GCodeError
 from .pack3mf import build_gcode_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.1.0'
+APP_TITLE='Novatech Cut 0.1.1'
 
 class App(tk.Tk):
     def __init__(self):
