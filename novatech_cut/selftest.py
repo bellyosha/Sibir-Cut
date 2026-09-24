@@ -4,7 +4,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
-from .geometry import path_length, load_raster
+from .geometry import path_length, load_raster, _morphological_skeleton
 from .gcode import generate_gcode, validate_gcode
 from .models import Project, SceneObject
 from .pack3mf import build_gcode_3mf, inspect_gcode_3mf
@@ -109,6 +109,22 @@ def _transparent_png_thread_regression_test(td: str) -> None:
     if not paths: raise RuntimeError('Transparent PNG centerline import produced no paths')
     if elapsed>10.0: raise RuntimeError(f'Transparent PNG centerline import too slow: {elapsed:.2f}s')
 
+def _centerline_completeness_regression_test() -> None:
+    import cv2
+    import numpy as np
+    img=np.zeros((420,900),dtype=np.uint8)
+    cv2.putText(img,'AH',(35,330),cv2.FONT_HERSHEY_SIMPLEX,9,255,55,cv2.LINE_AA)
+    skel=_morphological_skeleton(img)
+    if cv2.countNonZero(skel)<300:
+        raise RuntimeError('Centerline skeleton is unexpectedly sparse')
+    n,labels,stats,_=cv2.connectedComponentsWithStats(skel,8)
+    components=sum(1 for i in range(1,n) if stats[i,cv2.CC_STAT_AREA]>=5)
+    if components>4:
+        raise RuntimeError(f'Centerline skeleton fragmented into {components} components')
+    ys,xs=np.where(skel>0)
+    if xs.size==0 or (xs.max()-xs.min())<500 or (ys.max()-ys.min())<200:
+        raise RuntimeError('Centerline skeleton does not cover the source glyphs')
+
 def run_self_test() -> None:
     project = Project()
     project.printer.calibrated = True
@@ -130,6 +146,7 @@ def run_self_test() -> None:
         _raster_regression_test(td)
         _file_detection_regression_test(td)
         _transparent_png_thread_regression_test(td)
+        _centerline_completeness_regression_test()
 
 def main() -> int:
     try:
