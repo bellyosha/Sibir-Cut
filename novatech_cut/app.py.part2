@@ -1,6 +1,3 @@
-            try:on_success(result)
-            except Exception as exc:
-                messagebox.showerror(title,str(exc),parent=self)
         threading.Thread(target=worker,daemon=True).start()
         self.after(50,poll)
 
@@ -142,3 +139,9 @@
         prev=None
         for idx,path in enumerate(paths,1):
             if not path:continue
+            if prev is not None:
+                a=pt(*prev);bq=pt(*path[0]);c.create_line(*a,*bq,fill='#2563eb',dash=(4,3),width=1)
+            xy=[];step=max(1,len(path)//1200);sample=path[::step]
+            if path and sample[-1]!=path[-1]:sample=sample+[path[-1]]
+            for x,y in sample:xy+=pt(x,y)
+            if len(xy)>=4:c.create_line(*xy,fill='#dc2626',width=2)
