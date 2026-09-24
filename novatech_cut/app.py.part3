@@ -1,23 +1,3 @@
-            if len(path)>=2 and idx<=300:
-                q0=pt(*path[0]);q1=pt(*path[min(1,len(path)-1)]);c.create_line(*q0,*q1,fill='#dc2626',width=2,arrow='last')
-                c.create_text(q0[0]+5,q0[1]-5,text=str(idx),anchor='sw',fill='#7f1d1d')
-            prev=path[-1]
-        sel=self.current_index()
-        if sel is not None and sel<len(self.project.objects):
-            x0s,y0s,x1s,y1s=self._object_bounds(self.project.objects[sel]);A=pt(x0s,y1s);B=pt(x1s,y0s)
-            c.create_rectangle(A[0],A[1],B[0],B[1],outline='#16a34a',dash=(6,3),width=2)
-        c.create_text(ox+8,oy+8,text='Bambu Lab A1 — 256 × 256 мм   •   ЛКМ: выбрать и перетащить',anchor='nw',fill='#334155')
-    def update_status(self):
-        try:
-            if self.prepare_error:
-                self.status.config(text=self.prepare_error);self.warn.config(text='');return
-            paths=self.prepared_paths;b=bbox(paths);length=sum(path_length(p) for p in paths);m=self.project.material
-            est=length/max(0.1,m.work_speed)*max(1,m.passes);kind='рисования' if m.mode=='Рисование' else 'реза';self.status.config(text=f'Траекторий: {len(paths)}   Длина {kind}: {length:.1f} мм   ≈ {est:.0f} с   Границы: {b[0]:.1f},{b[1]:.1f} — {b[2]:.1f},{b[3]:.1f} мм')
-            l,bb,r,t=self.project.printer.safe_bounds;bad=bool(paths) and (b[0]<l or b[1]<bb or b[2]>r or b[3]>t);self.warn.config(text='⚠ Выход за безопасную область' if bad else '')
-        except Exception as e:self.status.config(text=str(e));self.warn.config(text='')
-    def save_project(self):
-        self.sync_material();f=self.current_file or filedialog.asksaveasfilename(defaultextension='.ncut',filetypes=[('Novatech Cut project','*.ncut')]);
-        if f:save_project(self.project,f);self.current_file=f
     def open_project(self):
         f=filedialog.askopenfilename(filetypes=[('Novatech Cut project','*.ncut')]);
         if f:
@@ -145,3 +125,33 @@
                 ttk.Label(draw,text='Отступ от края, мм').grid(row=2,column=0,sticky='w');ttk.Entry(draw,textvariable=winset,width=10).grid(row=2,column=1,padx=8);ttk.Checkbutton(draw,text='Перекрёстная заливка',variable=wcross).grid(row=2,column=2,columnspan=2,sticky='w')
                 grid.columnconfigure(1,weight=1)
                 note('Для заполненных букв: «Рисование» → «Контур + заливка». Для вырезания тех же букв: «Резка».')
+            elif i==3:
+                desc.config(text='Калибровка сообщает программе, где относительно сопла находится UMTS и на какой Z инструмент касается материала.')
+                p=self.project.printer
+                if p.calibrated:note(f'✓ Профиль откалиброван. Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}; рабочая Z={p.work_z:.2f}; безопасная Z={p.safe_z:.2f}.','ok')
+                else:note('Профиль ещё не откалиброван. Реальный экспорт заблокирован.','bad')
+                note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Безопасная Z — инструмент гарантированно не касается материала.\n• Рабочая Z — нож/ручка касается материала с нужным прижимом.\n\nUMTS должен быть СНЯТ во время homing. Значения Z нельзя угадывать: их определяют на конкретном модуле маленькими шагами.')
+                ttk.Button(body,text='Открыть мастер калибровки',command=self.calibrate).pack(anchor='w',pady=8);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
+            elif i==4:
+                desc.config(text='Сначала проверяем траекторию без касания материала. Это обязательный этап перед первым реальным запуском.')
+                if self._air_test_exported:note('✓ Воздушный тест для текущего задания сохранён.','ok')
+                else:note('Воздушный тест ещё не сохранён.','warn')
+                note('1. UMTS перед стартом файла должен быть снят.\n2. Запустите воздушный файл на A1.\n3. Принтер выполнит homing и встанет в парковку.\n4. На паузе установите UMTS и продолжите.\n5. Убедитесь, что инструмент нигде не касается стола и вся траектория остаётся в нужной зоне.')
+                def air():
+                    if self.export(air=True,show_message=False):messagebox.showinfo('Воздушный тест','Файл сохранён. Перенесите его на принтер и проверьте движение без касания материала.',parent=w);render()
+                ttk.Button(body,text='Сохранить файл воздушного теста…',command=air).pack(anchor='w',pady=8)
+            else:
+                desc.config(text='После успешного воздушного теста можно сформировать рабочий файл и запустить его на A1.')
+                note('В этой версии Novatech Cut готовит проверенный .gcode.3mf, но не отправляет его на принтер по сети автоматически.')
+                note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.3mf.\n2. Перенесите файл на microSD/локальный носитель, с которого A1 показывает задания.\n3. ПЕРЕД стартом снимите UMTS.\n4. Запустите файл: сначала выполняется homing без UMTS, затем головка паркуется.\n5. На первой паузе установите UMTS и продолжите.\n6. Выполнится резка/рисование без нагрева и экструзии.\n7. В конце головка поднимется и припаркуется; на второй паузе снимите UMTS, затем завершите задание.','warn')
+                def final_export():
+                    if not self._air_test_exported:
+                        if not messagebox.askyesno('Воздушный тест','Для текущего задания не отмечен сохранённый воздушный тест. Всё равно перейти к экспорту?',parent=w):return
+                    if self.export(air=False,show_message=False):messagebox.showinfo('Рабочий файл','Рабочий файл создан. Теперь перенесите его на принтер по инструкции в этом окне.',parent=w);render()
+                ttk.Button(body,text='Экспортировать рабочий .gcode.3mf…',style='Danger.TButton',command=final_export).pack(anchor='w',pady=8)
+                ttk.Button(body,text='Открыть папку последнего экспорта',command=open_export_folder).pack(anchor='w')
+        def go(delta):
+            i=step['i']
+            if delta>0:
+                if i==0 and not self.project.objects:messagebox.showwarning('Шаг 1','Сначала импортируйте хотя бы один объект.',parent=w);return
+                if i==1:
