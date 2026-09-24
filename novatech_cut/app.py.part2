@@ -22,33 +22,74 @@
     def delete(self):
         i=self.current_index();
         if i is not None:self.checkpoint();self.project.objects.pop(i);self.refresh_all()
+    def _run_background(self, title, fn, on_success):
+        if self._busy:
+            messagebox.showinfo('Novatech Cut','Сейчас уже выполняется обработка. Дождитесь её завершения.',parent=self)
+            return
+        self._busy=True
+        w=tk.Toplevel(self);self._busy_win=w;w.title(title);w.geometry('430x130');w.transient(self);w.resizable(False,False)
+        ttk.Label(w,text=title,style='Title.TLabel').pack(anchor='w',padx=16,pady=(16,6))
+        ttk.Label(w,text='Окно можно перемещать — интерфейс не должен зависать.').pack(anchor='w',padx=16)
+        bar=ttk.Progressbar(w,mode='indeterminate');bar.pack(fill='x',padx=16,pady=14);bar.start(12)
+        w.protocol('WM_DELETE_WINDOW',lambda:None)
+
+        def worker():
+            try:
+                result=fn();error=None
+            except Exception as exc:
+                result=None;error=exc
+            def finish():
+                self._busy=False;self._busy_win=None
+                try:bar.stop();w.destroy()
+                except Exception:pass
+                if error is not None:
+                    messagebox.showerror(title,str(error),parent=self)
+                    return
+                try:on_success(result)
+                except Exception as exc:
+                    messagebox.showerror(title,str(exc),parent=self)
+            self.after(0,finish)
+        threading.Thread(target=worker,daemon=True).start()
+
     def do_import(self):
-        f=filedialog.askopenfilename(filetypes=[('Поддерживаемые','*.svg *.dxf *.png *.jpg *.jpeg *.bmp'),('Все файлы','*.*')]);
+        f=filedialog.askopenfilename(filetypes=[('Поддерживаемые','*.svg *.dxf *.png *.jpg *.jpeg *.bmp'),('Все файлы','*.*')])
         if not f:return
-        try:
-            opts={}; is_raster=Path(f).suffix.lower() in ('.png','.jpg','.jpeg','.bmp')
-            if is_raster:
-                th=simpledialog.askinteger('Векторизация','Порог 0–255:',initialvalue=128,minvalue=0,maxvalue=255,parent=self)
-                sm=simpledialog.askfloat('Векторизация','Сглаживание (0–5):',initialvalue=1.0,minvalue=0,maxvalue=5,parent=self)
-                inv=messagebox.askyesno('Векторизация','Инвертировать изображение?',parent=self)
-                center=messagebox.askyesno('Векторизация','Режим центральных линий?\nДа — рисование ручкой/маркером.\nНет — контур резки.',parent=self)
-                opts={'threshold':128 if th is None else th,'external_only':not center,'smoothing':1.0 if sm is None else sm,'invert':inv,'centerline':center}
-            p=import_paths(f,**opts)
-            if not p:raise ValueError('Контуры не найдены')
-            if is_raster and not self.preview_paths_modal(p): return
-            self.checkpoint();x0,y0,x1,y1=bbox(p);o=SceneObject(Path(f).name,p,x=10-x0,y=10-y0,source=f);self.project.objects.append(o);self.refresh_all()
-        except Exception as e:messagebox.showerror('Импорт',str(e))
+        opts={};is_raster=Path(f).suffix.lower() in ('.png','.jpg','.jpeg','.bmp')
+        if is_raster:
+            th=simpledialog.askinteger('Векторизация','Порог 0–255:',initialvalue=128,minvalue=0,maxvalue=255,parent=self)
+            if th is None:return
+            sm=simpledialog.askfloat('Векторизация','Сглаживание (0–5):',initialvalue=1.0,minvalue=0,maxvalue=5,parent=self)
+            if sm is None:return
+            inv=messagebox.askyesno('Векторизация','Инвертировать изображение?',parent=self)
+            center=messagebox.askyesno('Векторизация','Режим центральных линий?\nДа — рисование ручкой/маркером.\nНет — контур резки.',parent=self)
+            opts={'threshold':th,'external_only':not center,'smoothing':sm,'invert':inv,'centerline':center}
+
+        def imported(paths):
+            if not paths:
+                raise ValueError('Контуры не найдены')
+            if is_raster and not self.preview_paths_modal(paths):
+                return
+            self.checkpoint();x0,y0,x1,y1=bbox(paths)
+            o=SceneObject(Path(f).name,paths,x=10-x0,y=10-y0,source=f)
+            self.project.objects.append(o)
+            self.refresh_all()
+
+        self._run_background('Преобразование изображения…',lambda:import_paths(f,**opts),imported)
     def preview_paths_modal(self, paths):
         w=tk.Toplevel(self);w.title('Предпросмотр векторизации');w.geometry('760x620');w.transient(self);w.grab_set();result={'ok':False}
         c=tk.Canvas(w,bg='white',highlightthickness=1,highlightbackground='#cbd5e1');c.pack(fill='both',expand=True,padx=10,pady=10)
         x0,y0,x1,y1=bbox(paths);ww=max(1,x1-x0);hh=max(1,y1-y0)
         def redraw(e=None):
             c.delete('all');W=max(100,c.winfo_width());H=max(100,c.winfo_height());z=min((W-40)/ww,(H-40)/hh)
-            for path in paths:
-                xy=[]
-                for x,y in path:xy.extend((20+(x-x0)*z,20+(y-y0)*z))
+            shown=paths[:1200]
+            for path in shown:
+                xy=[];step=max(1,len(path)//700)
+                sample=path[::step]
+                if path and sample[-1]!=path[-1]:sample=sample+[path[-1]]
+                for x,y in sample:xy.extend((20+(x-x0)*z,20+(y-y0)*z))
                 if len(xy)>=4:c.create_line(*xy,fill='#dc2626',width=2)
-            c.create_text(12,8,anchor='nw',text=f'Контуров: {len(paths)}  Размер: {ww:.1f} × {hh:.1f} мм',fill='#334155')
+            suffix='' if len(shown)==len(paths) else f'  (на экране первые {len(shown)})'
+            c.create_text(12,8,anchor='nw',text=f'Контуров: {len(paths)}{suffix}  Размер: {ww:.1f} × {hh:.1f} мм',fill='#334155')
         c.bind('<Configure>',redraw)
         bar=ttk.Frame(w,padding=10);bar.pack(fill='x')
         def accept():result['ok']=True;w.destroy()
@@ -57,14 +98,19 @@
 
     def select_material(self):
         name=self.material_var.get();m=next((x for x in DEFAULT_MATERIALS if x.name==name),None)
-        if m:self.project.material=MaterialProfile.from_dict(m.to_dict());self.refresh_fields();self.draw()
+        if m:self.project.material=MaterialProfile.from_dict(m.to_dict());self.refresh_all()
     def sync_material(self):
         m=self.project.material;m.mode=self.mode.get();m.passes=max(1,self.passes.get());m.work_speed=self.work_speed.get();m.travel_speed=self.travel_speed.get();m.work_z=self.work_z.get();m.safe_z=self.safe_z.get();m.blade_offset=max(0,self.blade_offset.get());m.overcut=max(0,self.overcut.get())
     def refresh_fields(self):
         m=self.project.material;self.material_var.set(m.name);self.mode.set(m.mode);self.passes.set(m.passes);self.work_speed.set(m.work_speed);self.travel_speed.set(m.travel_speed);self.work_z.set(m.work_z);self.safe_z.set(m.safe_z);self.blade_offset.set(m.blade_offset);self.overcut.set(m.overcut)
         self.calib_label.config(text='Профиль A1: ОТКАЛИБРОВАН' if self.project.printer.calibrated else 'Профиль A1: НЕ ОТКАЛИБРОВАН — экспорт заблокирован',foreground='#15803d' if self.project.printer.calibrated else '#b91c1c')
+    def _rebuild_prepared(self):
+        try:
+            self.prepared_paths=prepare_paths(self.project.objects,self.project.material);self.prepare_error=None
+        except Exception as exc:
+            self.prepared_paths=[];self.prepare_error=str(exc)
     def refresh_all(self):
-        self.listbox.delete(0,'end');[self.listbox.insert('end',o.name) for o in self.project.objects];self.refresh_fields();self.draw();self.update_status()
+        self._rebuild_prepared();self.listbox.delete(0,'end');[self.listbox.insert('end',o.name) for o in self.project.objects];self.refresh_fields();self.draw();self.update_status()
     def set_zoom(self,z):self.zoom=max(0.4,min(8,z));self.draw()
     def on_wheel(self,e):self.set_zoom(self.zoom*(1.12 if e.delta>0 else 1/1.12))
     def draw(self):
@@ -81,15 +127,15 @@
         A=pt(0,t);B=pt(l,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
         A=pt(r,t);B=pt(p.bed_width,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
         a=pt(l,bm);bb=pt(r,t);c.create_rectangle(a[0],bb[1],bb[0],a[1],outline='#64748b',dash=(5,4),width=2)
-        try:paths=prepare_paths(self.project.objects,self.project.material)
-        except:paths=[]
+        paths=self.prepared_paths
         prev=None
         for idx,path in enumerate(paths,1):
             if not path:continue
             if prev is not None:
                 a=pt(*prev);bq=pt(*path[0]);c.create_line(*a,*bq,fill='#2563eb',dash=(4,3),width=1)
-            xy=[]
-            for x,y in path:xy+=pt(x,y)
+            xy=[];step=max(1,len(path)//1200);sample=path[::step]
+            if path and sample[-1]!=path[-1]:sample=sample+[path[-1]]
+            for x,y in sample:xy+=pt(x,y)
             if len(xy)>=4:c.create_line(*xy,fill='#dc2626',width=2)
-            if len(path)>=2:
+            if len(path)>=2 and idx<=300:
                 q0=pt(*path[0]);q1=pt(*path[min(1,len(path)-1)]);c.create_line(*q0,*q1,fill='#dc2626',width=2,arrow='last')
