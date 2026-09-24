@@ -1,9 +1,3 @@
-    def open_project(self):
-        f=filedialog.askopenfilename(filetypes=[('Novatech Cut project','*.ncut')]);
-        if f:
-            try:self.project=load_project(f);self.current_file=f;self.refresh_all()
-            except Exception as e:messagebox.showerror('Проект',str(e))
-    def printer_profile(self):
         w=tk.Toplevel(self);w.title('Профиль оборудования — Bambu Lab A1 + UMTS');w.geometry('760x760');w.transient(self);w.grab_set();p=self.project.printer
         outer=ttk.Frame(w,padding=10);outer.pack(fill='both',expand=True);canvas=tk.Canvas(outer,highlightthickness=0);sb=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview);inner=ttk.Frame(canvas);inner.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')));canvas.create_window((0,0),window=inner,anchor='nw');canvas.configure(yscrollcommand=sb.set);canvas.pack(side='left',fill='both',expand=True);sb.pack(side='right',fill='y')
         vals={}
@@ -155,3 +149,12 @@
             if delta>0:
                 if i==0 and not self.project.objects:messagebox.showwarning('Шаг 1','Сначала импортируйте хотя бы один объект.',parent=w);return
                 if i==1:
+                    ok,msg=self._placement_ok()
+                    if not ok:messagebox.showwarning('Размещение','Объект выходит за безопасную область. Перетащите его на поле или используйте кнопку центрирования.',parent=w);return
+                if i==2:
+                    try:apply_settings()
+                    except Exception as exc:messagebox.showerror('Параметры',str(exc),parent=w);return
+                if i==3 and not self.project.printer.calibrated:messagebox.showwarning('Калибровка','Сначала завершите калибровку профиля A1 + UMTS.',parent=w);return
+                if i==4 and not self._air_test_exported:messagebox.showwarning('Воздушный тест','Сначала сохраните и проверьте воздушный тест.',parent=w);return
+                if i==len(titles)-1:w.destroy();return
+            step['i']=max(0,min(len(titles)-1,i+delta));render()
