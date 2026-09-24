@@ -223,11 +223,24 @@ def load_dxf(filename: str) -> List[Path]:
 
 def _morphological_skeleton(bw):
     import cv2, numpy as np
-    img=bw.copy(); skel=np.zeros_like(img); element=cv2.getStructuringElement(cv2.MORPH_CROSS,(3,3))
-    while True:
-        eroded=cv2.erode(img,element); opened=cv2.dilate(eroded,element); temp=cv2.subtract(img,opened); skel=cv2.bitwise_or(skel,temp); img=eroded
-        if cv2.countNonZero(img)==0: break
-    return skel
+    # Fast medial-ridge approximation. The old implementation repeatedly
+    # eroded the whole raster until nothing remained; on a nearly full
+    # 1200x1200 image that could take hundreds of full-frame passes.
+    if bw is None or bw.size==0 or cv2.countNonZero(bw)==0:
+        return np.zeros_like(bw)
+    distmap=cv2.distanceTransform(bw,cv2.DIST_L2,5)
+    dilated=cv2.dilate(distmap,np.ones((3,3),dtype=np.float32))
+    ridge=((distmap>=dilated-1e-5)&(distmap>0.75)).astype(np.uint8)*255
+    # Remove isolated one-pixel noise while keeping thin branches.
+    if cv2.countNonZero(ridge)>0:
+        n,labels,stats,_=cv2.connectedComponentsWithStats(ridge,8)
+        if n>1:
+            keep=np.zeros_like(ridge)
+            for i in range(1,n):
+                if stats[i,cv2.CC_STAT_AREA]>=2:
+                    keep[labels==i]=255
+            ridge=keep
+    return ridge
 
 def _trace_skeleton(skel, min_points=3):
     import numpy as np
@@ -267,17 +280,31 @@ def load_raster(filename: str, threshold=128, invert=False, min_area=10, externa
     import cv2, numpy as np
     try:
         data=np.fromfile(filename,dtype=np.uint8)
-        img=cv2.imdecode(data,cv2.IMREAD_GRAYSCALE) if data.size else None
+        raw=cv2.imdecode(data,cv2.IMREAD_UNCHANGED) if data.size else None
     except Exception as exc:
         raise ValueError(f'Не удалось прочитать изображение: {exc}') from exc
-    if img is None:
+    if raw is None:
         raise ValueError('Не удалось декодировать изображение. Проверьте реальный формат файла.')
 
+    # Preserve PNG transparency. AI-generated images often keep RGB pixels
+    # under transparent areas black; decoding straight to grayscale turns the
+    # transparent background into a giant black object. Composite alpha over
+    # white first, then convert to grayscale.
+    if raw.ndim==3 and raw.shape[2]==4:
+        bgr=raw[:,:,:3].astype(np.float32)
+        alpha=raw[:,:,3:4].astype(np.float32)/255.0
+        composed=(bgr*alpha+255.0*(1.0-alpha)).clip(0,255).astype(np.uint8)
+        img=cv2.cvtColor(composed,cv2.COLOR_BGR2GRAY)
+    elif raw.ndim==3 and raw.shape[2]>=3:
+        img=cv2.cvtColor(raw[:,:,:3],cv2.COLOR_BGR2GRAY)
+    else:
+        img=raw
+
     # Very large photos used to freeze the GUI and could create hundreds of
-    # thousands of points. Work on a bounded raster while preserving the
-    # physical size implied by the original 96 DPI assumption.
+    # thousands of points. Centerline mode is more expensive, so use a tighter
+    # working bound while preserving the physical scale.
     h0,w0=img.shape[:2]
-    max_dim=1800
+    max_dim=1200 if centerline else 1800
     scale=1.0
     if max(h0,w0)>max_dim:
         scale=max_dim/float(max(h0,w0))
@@ -290,6 +317,18 @@ def load_raster(filename: str, threshold=128, invert=False, min_area=10, externa
 
     flag=cv2.THRESH_BINARY_INV if not invert else cv2.THRESH_BINARY
     _,bw=cv2.threshold(img,int(threshold),255,flag)
+
+    if centerline:
+        occupancy=cv2.countNonZero(bw)/float(max(1,bw.size))
+        # If almost the whole canvas became foreground, the background was
+        # almost certainly selected. Flip it automatically instead of trying
+        # to skeletonize a full sheet for minutes.
+        if occupancy>0.80:
+            flipped=cv2.bitwise_not(bw)
+            flipped_occupancy=cv2.countNonZero(flipped)/float(max(1,flipped.size))
+            if flipped_occupancy<occupancy:
+                bw=flipped
+
     out=[]
     mm_per_px=(25.4/96.0)/scale
 
