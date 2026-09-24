@@ -266,27 +266,62 @@ def _trace_skeleton(skel, min_points=3):
 def load_raster(filename: str, threshold=128, invert=False, min_area=10, external_only=True, smoothing=1.0, centerline=False) -> List[Path]:
     import cv2
     img=cv2.imread(filename,cv2.IMREAD_GRAYSCALE)
-    if img is None: raise ValueError('Не удалось открыть изображение')
+    if img is None:
+        raise ValueError('Не удалось открыть изображение')
+
+    # Very large photos used to freeze the GUI and could create hundreds of
+    # thousands of points. Work on a bounded raster while preserving the
+    # physical size implied by the original 96 DPI assumption.
+    h0,w0=img.shape[:2]
+    max_dim=1800
+    scale=1.0
+    if max(h0,w0)>max_dim:
+        scale=max_dim/float(max(h0,w0))
+        img=cv2.resize(img,(max(1,int(round(w0*scale))),max(1,int(round(h0*scale)))),interpolation=cv2.INTER_AREA)
+
     if smoothing>0:
-        k=max(1,int(round(smoothing))*2+1); img=cv2.GaussianBlur(img,(k,k),0)
+        k=max(1,int(round(smoothing))*2+1)
+        if k%2==0:k+=1
+        img=cv2.GaussianBlur(img,(k,k),0)
+
     flag=cv2.THRESH_BINARY_INV if not invert else cv2.THRESH_BINARY
     _,bw=cv2.threshold(img,int(threshold),255,flag)
-    out=[]; mm_per_px=25.4/96.0
+    out=[]
+    mm_per_px=(25.4/96.0)/scale
+
     if centerline:
         skel=_morphological_skeleton(bw)
-        for raw in _trace_skeleton(skel):
+        raw_paths=_trace_skeleton(skel)
+        # Hard guard against pathological scans/noise.
+        raw_paths=sorted(raw_paths,key=len,reverse=True)[:2500]
+        total_points=0
+        for raw in raw_paths:
             p=[(x*mm_per_px,y*mm_per_px) for x,y in raw]
-            p=simplify_path(p,max(0.03,smoothing*mm_per_px))
-            if len(p)>=2:out.append(p)
+            p=simplify_path(p,max(0.05,smoothing*mm_per_px))
+            if len(p)>=2:
+                out.append(p)
+                total_points+=len(p)
+                if total_points>=60000:
+                    break
         return out
+
     mode=cv2.RETR_EXTERNAL if external_only else cv2.RETR_TREE
     contours,_=cv2.findContours(bw,mode,cv2.CHAIN_APPROX_TC89_KCOS)
-    for c in contours:
-        if abs(cv2.contourArea(c))<min_area: continue
-        eps=max(0.5,smoothing)*0.75
-        c=cv2.approxPolyDP(c,eps,True)
-        p=[(float(q[0][0])*mm_per_px,float(q[0][1])*mm_per_px) for q in c]
-        if len(p)>=3: p.append(p[0]); out.append(p)
+    contours=sorted(contours,key=lambda q:abs(cv2.contourArea(q)),reverse=True)[:2500]
+    effective_min_area=max(1.0,float(min_area)*scale*scale)
+    total_points=0
+    for contour in contours:
+        if abs(cv2.contourArea(contour))<effective_min_area:
+            continue
+        eps=max(0.75,float(smoothing))*0.9
+        contour=cv2.approxPolyDP(contour,eps,True)
+        p=[(float(q[0][0])*mm_per_px,float(q[0][1])*mm_per_px) for q in contour]
+        if len(p)>=3:
+            p.append(p[0])
+            out.append(p)
+            total_points+=len(p)
+            if total_points>=60000:
+                break
     return out
 
 def remove_duplicate_paths(paths: List[Path], tol=0.02) -> List[Path]:
@@ -300,20 +335,71 @@ def remove_duplicate_paths(paths: List[Path], tol=0.02) -> List[Path]:
     return out
 
 def join_close_endpoints(paths: List[Path], tol=0.05) -> List[Path]:
-    paths=[list(p) for p in paths]
-    changed=True
-    while changed:
-        changed=False
-        for i in range(len(paths)):
-            if changed: break
-            for j in range(i+1,len(paths)):
-                a,b=paths[i],paths[j]
-                variants=[(a[-1],b[0],a+b[1:]),(a[-1],b[-1],a+list(reversed(b[:-1]))),(a[0],b[-1],b+a[1:]),(a[0],b[0],list(reversed(b))+a[1:])]
-                for p1,p2,merged in variants:
-                    if dist(p1,p2)<=tol:
-                        paths[i]=merged; paths.pop(j);changed=True;break
+    paths=[list(p) for p in paths if len(p)>=2]
+    if len(paths)<2 or tol<=0:
+        return paths
+
+    # Closed raster contours do not need endpoint joining. This avoids the old
+    # O(n^2) scan when an image contains thousands of islands.
+    closed=[p for p in paths if is_closed(p,tol)]
+    open_paths=[p for p in paths if not is_closed(p,tol)]
+    if len(open_paths)<2:
+        return closed+open_paths
+
+    # For modest vector drawings keep the exact greedy behaviour.
+    if len(open_paths)<=350:
+        changed=True
+        while changed:
+            changed=False
+            for i in range(len(open_paths)):
                 if changed:break
-    return paths
+                for j in range(i+1,len(open_paths)):
+                    a,b=open_paths[i],open_paths[j]
+                    variants=[(a[-1],b[0],a+b[1:]),(a[-1],b[-1],a+list(reversed(b[:-1]))),(a[0],b[-1],b+a[1:]),(a[0],b[0],list(reversed(b))+a[1:])]
+                    for p1,p2,merged in variants:
+                        if dist(p1,p2)<=tol:
+                            open_paths[i]=merged;open_paths.pop(j);changed=True;break
+                    if changed:break
+        return closed+open_paths
+
+    # Large centerline jobs: spatial hash gives near O(n) endpoint matching.
+    cell=max(tol,1e-6)
+    buckets={}
+    alive={i:list(p) for i,p in enumerate(open_paths)}
+    def key(pt):return (int(math.floor(pt[0]/cell)),int(math.floor(pt[1]/cell)))
+    def add_endpoint(i,side,pt):buckets.setdefault(key(pt),set()).add((i,side))
+    def remove_endpoint(i,side,pt):
+        k=key(pt);s=buckets.get(k)
+        if s:
+            s.discard((i,side))
+            if not s:buckets.pop(k,None)
+    for i,p in alive.items():
+        add_endpoint(i,0,p[0]);add_endpoint(i,1,p[-1])
+
+    def nearest(pt,exclude):
+        kx,ky=key(pt);best=None
+        for dx in (-1,0,1):
+            for dy in (-1,0,1):
+                for j,side in buckets.get((kx+dx,ky+dy),()):
+                    if j==exclude or j not in alive:continue
+                    q=alive[j][0] if side==0 else alive[j][-1]
+                    d=dist(pt,q)
+                    if d<=tol and (best is None or d<best[0]):best=(d,j,side)
+        return best
+
+    for i in list(alive):
+        if i not in alive:continue
+        while True:
+            p=alive[i]
+            hit=nearest(p[-1],i)
+            if hit is None:break
+            _,j,side=hit;q=alive[j]
+            remove_endpoint(i,0,p[0]);remove_endpoint(i,1,p[-1]);remove_endpoint(j,0,q[0]);remove_endpoint(j,1,q[-1])
+            if side==1:q=list(reversed(q))
+            alive[i]=p+q[1:]
+            del alive[j]
+            add_endpoint(i,0,alive[i][0]);add_endpoint(i,1,alive[i][-1])
+    return closed+list(alive.values())
 
 def simplify_path(path: Path, tolerance=0.03) -> Path:
     if len(path)<=2:return path
@@ -325,20 +411,36 @@ def simplify_path(path: Path, tolerance=0.03) -> Path:
 
 def optimize_order(paths: List[Path]) -> List[Path]:
     if not paths:return []
-    closed=[p for p in paths if is_closed(p)]; openp=[p for p in paths if not is_closed(p)]
+    closed=[p for p in paths if is_closed(p)]
+    openp=[p for p in paths if not is_closed(p)]
     def area(p):
         return abs(sum(p[i][0]*p[i+1][1]-p[i+1][0]*p[i][1] for i in range(len(p)-1))/2)
+    # Small enclosed contours before large outer contours.
     closed.sort(key=area)
     ordered=closed[:]
-    remaining=openp[:]
     cur=ordered[-1][-1] if ordered else (0.0,0.0)
-    while remaining:
-        best=None
-        for idx,p in enumerate(remaining):
-            d1=dist(cur,p[0]);d2=dist(cur,p[-1])
-            cand=(min(d1,d2),idx,d2<d1)
-            if best is None or cand<best:best=cand
-        _,idx,rev=best;p=remaining.pop(idx);p=list(reversed(p)) if rev else p;ordered.append(p);cur=p[-1]
+
+    # Exact greedy nearest-neighbour is O(n^2); keep it only where cheap.
+    if len(openp)<=500:
+        remaining=openp[:]
+        while remaining:
+            best=None
+            for idx,p in enumerate(remaining):
+                d1=dist(cur,p[0]);d2=dist(cur,p[-1])
+                cand=(min(d1,d2),idx,d2<d1)
+                if best is None or cand<best:best=cand
+            _,idx,rev=best
+            p=remaining.pop(idx)
+            p=list(reversed(p)) if rev else p
+            ordered.append(p);cur=p[-1]
+        return ordered
+
+    # Large centerline sets: deterministic sweep order, then orient each path
+    # toward the current tool position. Complexity O(n log n).
+    openp.sort(key=lambda p:(min(p[0][1],p[-1][1]),min(p[0][0],p[-1][0])))
+    for p in openp:
+        if dist(cur,p[-1])<dist(cur,p[0]):p=list(reversed(p))
+        ordered.append(p);cur=p[-1]
     return ordered
 
 def _unit(a,b):
