@@ -88,13 +88,13 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "build\installer.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!(Test-Path "dist/Novatech_Cut_Setup_0.1.3_x64.exe")) { throw "Installer was not created" }
+          if (!(Test-Path "dist/Novatech_Cut_Setup_0.1.4_x64.exe")) { throw "Installer was not created" }
 
       - name: Test installer on clean directory
         shell: pwsh
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "NovatechCutInstalled"
-          $setup = Resolve-Path "dist/Novatech_Cut_Setup_0.1.3_x64.exe"
+          $setup = Resolve-Path "dist/Novatech_Cut_Setup_0.1.4_x64.exe"
           $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART",("/DIR=" + $installDir) -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Installer failed: exit $($p.ExitCode)" }
           $installedExe = Join-Path $installDir "NovatechCut.exe"
@@ -107,7 +107,7 @@ jobs:
         run: |
           Remove-Item novatech_cut/app.py.part* -Force
           $items = @("novatech_cut","build","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
-          Compress-Archive $items dist/Novatech_Cut_v0.1.3_SOURCE.zip -Force
+          Compress-Archive $items dist/Novatech_Cut_v0.1.4_SOURCE.zip -Force
 
       - name: Write SHA256 checksums
         shell: pwsh
@@ -115,8 +115,8 @@ jobs:
           @(
             "NovatechCut.exe",
             "Novatech_Cut_Portable_Windows_x64.zip",
-            "Novatech_Cut_Setup_0.1.3_x64.exe",
-            "Novatech_Cut_v0.1.3_SOURCE.zip"
+            "Novatech_Cut_Setup_0.1.4_x64.exe",
+            "Novatech_Cut_v0.1.4_SOURCE.zip"
           ) | ForEach-Object {
             $h = Get-FileHash ("dist/" + $_) -Algorithm SHA256
             "$($h.Hash.ToLower())  $_"
@@ -125,11 +125,11 @@ jobs:
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Novatech-Cut-Windows-v0.1.3
+          name: Novatech-Cut-Windows-v0.1.4
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/Novatech_Cut_Setup_0.1.3_x64.exe
+            dist/Novatech_Cut_Setup_0.1.4_x64.exe
             dist/Novatech_Cut_Portable_Windows_x64.zip
-            dist/Novatech_Cut_v0.1.3_SOURCE.zip
+            dist/Novatech_Cut_v0.1.4_SOURCE.zip
             dist/SHA256SUMS-WINDOWS.txt
