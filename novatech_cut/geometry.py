@@ -463,6 +463,80 @@ def simplify_path(path: Path, tolerance=0.03) -> Path:
         return [(float(x),float(y)) for x,y in g.coords]
     except Exception:return path
 
+
+def hatch_fill_paths(paths: List[Path], spacing: float=1.0, angle_deg: float=45.0, inset: float=0.0, crosshatch: bool=False) -> List[Path]:
+    """Generate pen hatch lines inside closed contours using an even/odd fill rule."""
+    spacing=max(0.1,float(spacing))
+    try:
+        from shapely.geometry import Polygon, LineString, GeometryCollection, LineString as SLineString
+        from shapely.affinity import rotate as shp_rotate
+    except Exception as exc:
+        raise ValueError(f'Заливка требует Shapely: {exc}') from exc
+
+    polygons=[]
+    for path in paths:
+        if len(path)<4 or not is_closed(path,0.05):
+            continue
+        try:
+            poly=Polygon(path)
+            if not poly.is_valid:
+                poly=poly.buffer(0)
+            if not poly.is_empty and poly.area>1e-4:
+                if poly.geom_type=='Polygon': polygons.append(poly)
+                elif poly.geom_type=='MultiPolygon': polygons.extend(list(poly.geoms))
+        except Exception:
+            continue
+    if not polygons:
+        return []
+
+    geom=GeometryCollection()
+    for poly in sorted(polygons,key=lambda g:g.area,reverse=True):
+        geom=geom.symmetric_difference(poly)
+    if inset>0 and not geom.is_empty:
+        shrunk=geom.buffer(-float(inset),join_style=2)
+        if not shrunk.is_empty:
+            geom=shrunk
+    if geom.is_empty:
+        return []
+
+    def lines_for_angle(angle):
+        cx,cy=geom.centroid.x,geom.centroid.y
+        rotation_origin=(float(cx),float(cy))
+        rotated=shp_rotate(geom,-float(angle),origin=rotation_origin,use_radians=False)
+        minx,miny,maxx,maxy=rotated.bounds
+        pad=max(spacing*2.0,1.0)
+        y=miny+spacing*0.5
+        out=[];reverse=False
+        while y<=maxy+1e-9:
+            cut=rotated.intersection(LineString([(minx-pad,y),(maxx+pad,y)]))
+            segs=[]
+            if cut.is_empty:
+                y+=spacing;continue
+            if cut.geom_type=='LineString':
+                segs=[cut]
+            elif cut.geom_type=='MultiLineString':
+                segs=list(cut.geoms)
+            elif hasattr(cut,'geoms'):
+                segs=[g for g in cut.geoms if g.geom_type=='LineString']
+            segs.sort(key=lambda g:g.bounds[0])
+            if reverse:
+                segs=list(reversed(segs))
+            for seg in segs:
+                coords=list(seg.coords)
+                if len(coords)<2:continue
+                if reverse: coords=list(reversed(coords))
+                back=shp_rotate(SLineString(coords),float(angle),origin=rotation_origin,use_radians=False)
+                pts=[(float(x),float(y0)) for x,y0 in back.coords]
+                if len(pts)>=2:out.append(pts)
+                reverse=not reverse
+            y+=spacing
+        return out
+
+    result=lines_for_angle(angle_deg)
+    if crosshatch:
+        result.extend(lines_for_angle(float(angle_deg)+90.0))
+    return result
+
 def optimize_order(paths: List[Path]) -> List[Path]:
     if not paths:return []
     closed=[p for p in paths if is_closed(p)]
