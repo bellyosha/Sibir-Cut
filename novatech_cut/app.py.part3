@@ -3,7 +3,9 @@
         c.create_text(ox+8,oy+8,text='Bambu Lab A1 — 256 × 256 мм',anchor='nw',fill='#334155')
     def update_status(self):
         try:
-            paths=prepare_paths(self.project.objects,self.project.material);b=bbox(paths);length=sum(path_length(p) for p in paths);m=self.project.material
+            if self.prepare_error:
+                self.status.config(text=self.prepare_error);self.warn.config(text='');return
+            paths=self.prepared_paths;b=bbox(paths);length=sum(path_length(p) for p in paths);m=self.project.material
             est=length/max(0.1,m.work_speed)*max(1,m.passes);self.status.config(text=f'Контуров: {len(paths)}   Рез: {length:.1f} мм   ≈ {est:.0f} с   Границы: {b[0]:.1f},{b[1]:.1f} — {b[2]:.1f},{b[3]:.1f} мм')
             l,bb,r,t=self.project.printer.safe_bounds;bad=bool(paths) and (b[0]<l or b[1]<bb or b[2]>r or b[3]>t);self.warn.config(text='⚠ Выход за безопасную область' if bad else '')
         except Exception as e:self.status.config(text=str(e));self.warn.config(text='')
@@ -42,8 +44,7 @@
             except Exception as e:messagebox.showerror('Профиль',str(e),parent=w)
         ttk.Button(bar,text='Импорт профиля',command=importp).pack(side='left');ttk.Button(bar,text='Экспорт профиля',command=exportp).pack(side='left',padx=4);ttk.Button(bar,text='Применить (потребуется калибровка)',command=apply).pack(side='right')
     def animate_preview(self):
-        try:paths=prepare_paths(self.project.objects,self.project.material)
-        except Exception:return
+        paths=self.prepared_paths
         if not paths:return
         self.draw();p=self.project.printer;ox,oy=self.origin;z=self.zoom
         def pt(x,y):return ox+x*z,oy+(p.bed_height-y)*z
