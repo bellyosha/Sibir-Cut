@@ -57,7 +57,11 @@ jobs:
         run: |
           if (!(Test-Path "dist/NovatechCut.exe")) { throw "NovatechCut.exe was not created" }
           $p = Start-Process -FilePath (Resolve-Path "dist/NovatechCut.exe") -ArgumentList "--self-test" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "Frozen EXE self-test failed: exit $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) {
+            $log = Join-Path $env:TEMP "novatech-cut-selftest-error.txt"
+            if (Test-Path $log) { Get-Content $log }
+            throw "Frozen EXE self-test failed: exit $($p.ExitCode)"
+          }
 
       - name: Create portable ZIP
         shell: pwsh
