@@ -222,25 +222,36 @@ def load_dxf(filename: str) -> List[Path]:
     return out
 
 def _morphological_skeleton(bw):
-    import cv2, numpy as np
-    # Fast medial-ridge approximation. The old implementation repeatedly
-    # eroded the whole raster until nothing remained; on a nearly full
-    # 1200x1200 image that could take hundreds of full-frame passes.
-    if bw is None or bw.size==0 or cv2.countNonZero(bw)==0:
+    import numpy as np
+    # Zhang-Suen thinning: preserves a continuous one-pixel centerline instead
+    # of returning only local distance-map maxima. Vectorized NumPy keeps this
+    # fast enough for the 1200 px centerline working limit.
+    img=(bw>0).astype(np.uint8)
+    if img.size==0 or not img.any():
         return np.zeros_like(bw)
-    distmap=cv2.distanceTransform(bw,cv2.DIST_L2,5)
-    dilated=cv2.dilate(distmap,np.ones((3,3),dtype=np.float32))
-    ridge=((distmap>=dilated-1e-5)&(distmap>0.75)).astype(np.uint8)*255
-    # Remove isolated one-pixel noise while keeping thin branches.
-    if cv2.countNonZero(ridge)>0:
-        n,labels,stats,_=cv2.connectedComponentsWithStats(ridge,8)
-        if n>1:
-            keep=np.zeros_like(ridge)
-            for i in range(1,n):
-                if stats[i,cv2.CC_STAT_AREA]>=2:
-                    keep[labels==i]=255
-            ridge=keep
-    return ridge
+    img[[0,-1],:]=0
+    img[:,[0,-1]]=0
+
+    for _ in range(256):
+        changed=False
+        for phase in (0,1):
+            c=img[1:-1,1:-1]
+            p2=img[:-2,1:-1]; p3=img[:-2,2:]; p4=img[1:-1,2:]; p5=img[2:,2:]
+            p6=img[2:,1:-1]; p7=img[2:,:-2]; p8=img[1:-1,:-2]; p9=img[:-2,:-2]
+            n=p2+p3+p4+p5+p6+p7+p8+p9
+            a=((p2==0)&(p3==1)).astype(np.uint8)
+            a+=((p3==0)&(p4==1)); a+=((p4==0)&(p5==1)); a+=((p5==0)&(p6==1))
+            a+=((p6==0)&(p7==1)); a+=((p7==0)&(p8==1)); a+=((p8==0)&(p9==1)); a+=((p9==0)&(p2==1))
+            if phase==0:
+                remove=(c==1)&(n>=2)&(n<=6)&(a==1)&((p2*p4*p6)==0)&((p4*p6*p8)==0)
+            else:
+                remove=(c==1)&(n>=2)&(n<=6)&(a==1)&((p2*p4*p8)==0)&((p2*p6*p8)==0)
+            if remove.any():
+                c[remove]=0
+                changed=True
+        if not changed:
+            break
+    return (img*255).astype(np.uint8)
 
 def _trace_skeleton(skel, min_points=3):
     import numpy as np
