@@ -21,7 +21,7 @@
         vy=tk.DoubleVar(value=self.project.printer.tool_offset_y)
         vw=tk.DoubleVar(value=self.project.printer.work_z)
         vs=tk.DoubleVar(value=self.project.printer.safe_z)
-        ok=tk.BooleanVar(False)
+        ok=tk.BooleanVar(master=w,value=False)
 
         def apply():
             if not ok.get():
