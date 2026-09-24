@@ -1,12 +1,3 @@
-                    try:bar.stop();w.destroy()
-                    except Exception:pass
-                    messagebox.showerror(title,'Обработка превысила 45 секунд и остановлена для интерфейса. Закройте приложение и пришлите проблемный файл — такая операция не должна длиться так долго.',parent=self)
-                    return
-                self.after(50,poll);return
-            self._busy=False;self._busy_win=None
-            try:bar.stop();w.destroy()
-            except Exception:pass
-            if error is not None:
                 messagebox.showerror(title,str(error),parent=self)
                 return
             try:on_success(result)
@@ -131,3 +122,21 @@
         self._drag=None;self._drag_active=False;self.refresh_all()
     def set_zoom(self,z):self.zoom=max(0.4,min(8,z));self.draw()
     def on_wheel(self,e):self.set_zoom(self.zoom*(1.12 if e.delta>0 else 1/1.12))
+    def draw(self):
+        c=self.canvas;c.delete('all');ox,oy=self.origin;z=self.zoom;p=self.project.printer
+        def pt(x,y):return ox+x*z, oy+(p.bed_height-y)*z
+        x0,y0=pt(0,p.bed_height);x1,y1=pt(p.bed_width,0);c.create_rectangle(x0,y0,x1,y1,fill='white',outline='#64748b',width=2)
+        for x in range(0,257,10):
+            a=pt(x,0);b=pt(x,p.bed_height);c.create_line(*a,*b,fill='#e2e8f0')
+        for y in range(0,257,10):
+            a=pt(0,y);b=pt(p.bed_width,y);c.create_line(*a,*b,fill='#e2e8f0')
+        l,bm,r,t=p.safe_bounds
+        A=pt(0,p.bed_height);B=pt(p.bed_width,t);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
+        A=pt(0,bm);B=pt(p.bed_width,0);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
+        A=pt(0,t);B=pt(l,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
+        A=pt(r,t);B=pt(p.bed_width,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
+        a=pt(l,bm);bb=pt(r,t);c.create_rectangle(a[0],bb[1],bb[0],a[1],outline='#64748b',dash=(5,4),width=2)
+        if self._drag_active:
+            paths=[]
+            for obj in self.project.objects:paths.extend(transformed_paths(obj))
+        else:
