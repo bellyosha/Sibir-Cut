@@ -3,13 +3,13 @@ import json, math, os, sys, copy, threading, queue, tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
 from .models import Project, SceneObject, DEFAULT_MATERIALS, MaterialProfile
-from .pipeline import import_paths, prepare_paths
+from .pipeline import import_paths, prepare_paths, detect_import_kind
 from .geometry import bbox, path_length
 from .gcode import generate_gcode, GCodeError
 from .pack3mf import build_gcode_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.1.1'
+APP_TITLE='Novatech Cut 0.1.2'
 
 class App(tk.Tk):
     def __init__(self):
