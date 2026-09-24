@@ -4,18 +4,19 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
 from .models import Project, SceneObject, DEFAULT_MATERIALS, MaterialProfile
 from .pipeline import import_paths, prepare_paths, detect_import_kind
-from .geometry import bbox, path_length
+from .geometry import bbox, path_length, transformed_paths
 from .gcode import generate_gcode, GCodeError
 from .pack3mf import build_gcode_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.1.5'
+APP_TITLE='Novatech Cut 0.2.0'
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__(); self.title(APP_TITLE); self.geometry('1400x850'); self.minsize(1050,680)
         self.project=Project();self.current_file=None;self.zoom=2.2;self.origin=(28,28);self.history=[];self.future=[]
         self.prepared_paths=[];self.prepare_error=None;self._busy=False;self._busy_win=None
+        self._drag=None;self._drag_active=False;self._air_test_exported=False;self.last_export_path=None
         self._style();self._build();self.refresh_all()
     def _style(self):
         s=ttk.Style(self); 
@@ -25,7 +26,7 @@ class App(tk.Tk):
         s.configure('Title.TLabel',font=('Segoe UI',12,'bold'))
     def _build(self):
         top=ttk.Frame(self,padding=8);top.pack(fill='x')
-        for text,cmd in [('Импорт',self.do_import),('Открыть проект',self.open_project),('Сохранить',self.save_project),('Отмена',self.undo),('Повтор',self.redo),('Профиль принтера',self.printer_profile),('Калибровка',self.calibrate),('Анимация',self.animate_preview)]:
+        for text,cmd in [('Импорт',self.do_import),('Открыть проект',self.open_project),('Сохранить',self.save_project),('Отмена',self.undo),('Повтор',self.redo),('Профиль принтера',self.printer_profile),('Калибровка',self.calibrate),('Анимация',self.animate_preview),('Мастер запуска',self.launch_wizard)]:
             ttk.Button(top,text=text,command=cmd).pack(side='left',padx=3)
         ttk.Button(top,text='−',width=3,command=lambda:self.set_zoom(self.zoom/1.2)).pack(side='right');ttk.Button(top,text='+',width=3,command=lambda:self.set_zoom(self.zoom*1.2)).pack(side='right')
         main=ttk.Panedwindow(self,orient='horizontal');main.pack(fill='both',expand=True,padx=8,pady=(0,8))
@@ -39,16 +40,25 @@ class App(tk.Tk):
         rr=ttk.Frame(tf);rr.pack(fill='x');ttk.Button(rr,text='Зеркало X',command=lambda:self.mirror('x')).pack(side='left',expand=True,fill='x');ttk.Button(rr,text='Зеркало Y',command=lambda:self.mirror('y')).pack(side='left',expand=True,fill='x')
         ar=ttk.Frame(tf);ar.pack(fill='x',pady=(4,0));ttk.Button(ar,text='По центру',command=lambda:self.align('center')).pack(side='left',expand=True,fill='x');ttk.Button(ar,text='К левому',command=lambda:self.align('left')).pack(side='left',expand=True,fill='x')
         ar2=ttk.Frame(tf);ar2.pack(fill='x');ttk.Button(ar2,text='Дублировать…',command=self.duplicate_many).pack(side='left',expand=True,fill='x');ttk.Button(ar2,text='Удалить',command=self.delete).pack(side='left',expand=True,fill='x')
-        self.canvas=tk.Canvas(center,bg='#f2f4f7',highlightthickness=0);self.canvas.pack(fill='both',expand=True);self.canvas.bind('<Configure>',lambda e:self.draw());self.canvas.bind('<MouseWheel>',self.on_wheel)
+        self.canvas=tk.Canvas(center,bg='#f2f4f7',highlightthickness=0);self.canvas.pack(fill='both',expand=True);self.canvas.bind('<Configure>',lambda e:self.draw());self.canvas.bind('<MouseWheel>',self.on_wheel);self.canvas.bind('<Button-1>',self.on_canvas_press);self.canvas.bind('<B1-Motion>',self.on_canvas_drag);self.canvas.bind('<ButtonRelease-1>',self.on_canvas_release)
         ttk.Label(right,text='Параметры задания',style='Title.TLabel').pack(anchor='w')
         self.material_var=tk.StringVar(value=self.project.material.name);cb=ttk.Combobox(right,textvariable=self.material_var,values=[m.name for m in DEFAULT_MATERIALS],state='readonly');cb.pack(fill='x',pady=5);cb.bind('<<ComboboxSelected>>',lambda e:self.select_material())
         self.mode=tk.StringVar();self.passes=tk.IntVar();self.work_speed=tk.DoubleVar();self.travel_speed=tk.DoubleVar();self.work_z=tk.DoubleVar();self.safe_z=tk.DoubleVar();self.blade_offset=tk.DoubleVar();self.overcut=tk.DoubleVar()
-        for label,var in [('Режим',self.mode),('Проходов',self.passes),('Рабочая скорость, мм/с',self.work_speed),('Холостой ход, мм/с',self.travel_speed),('Рабочая высота Z',self.work_z),('Безопасная высота Z',self.safe_z),('Blade offset, мм',self.blade_offset),('Overcut, мм',self.overcut)]:
+        self.drawing_style=tk.StringVar();self.fill_spacing=tk.DoubleVar();self.fill_angle=tk.DoubleVar();self.fill_crosshatch=tk.BooleanVar();self.fill_inset=tk.DoubleVar()
+        r=ttk.Frame(right);r.pack(fill='x',pady=2);ttk.Label(r,text='Режим').pack(anchor='w');mode_cb=ttk.Combobox(r,textvariable=self.mode,values=['Резка','Рисование'],state='readonly');mode_cb.pack(fill='x');mode_cb.bind('<<ComboboxSelected>>',lambda e:self.on_mode_changed())
+        for label,var in [('Проходов',self.passes),('Рабочая скорость, мм/с',self.work_speed),('Холостой ход, мм/с',self.travel_speed),('Рабочая высота Z',self.work_z),('Безопасная высота Z',self.safe_z),('Blade offset, мм',self.blade_offset),('Overcut, мм',self.overcut)]:
             r=ttk.Frame(right);r.pack(fill='x',pady=2);ttk.Label(r,text=label).pack(anchor='w');ttk.Entry(r,textvariable=var).pack(fill='x')
+        draw_box=ttk.LabelFrame(right,text='Рисование / заливка',padding=6);draw_box.pack(fill='x',pady=6)
+        ttk.Label(draw_box,text='Что рисовать').pack(anchor='w');ttk.Combobox(draw_box,textvariable=self.drawing_style,values=['Контур + заливка','Только заливка','Только контур'],state='readonly').pack(fill='x')
+        for label,var in [('Шаг заливки, мм',self.fill_spacing),('Угол заливки, °',self.fill_angle),('Отступ заливки от края, мм',self.fill_inset)]:
+            rr=ttk.Frame(draw_box);rr.pack(fill='x',pady=2);ttk.Label(rr,text=label).pack(anchor='w');ttk.Entry(rr,textvariable=var).pack(fill='x')
+        ttk.Checkbutton(draw_box,text='Перекрёстная заливка (второй проход +90°)',variable=self.fill_crosshatch).pack(anchor='w',pady=3);ttk.Button(draw_box,text='Применить и обновить предпросмотр',command=self.apply_job_settings).pack(fill='x',pady=(4,0))
+        ttk.Label(right,text='Подсказка: объект можно перетаскивать мышкой прямо по полю A1.',foreground='#475569',wraplength=300).pack(fill='x',pady=(4,2))
         ttk.Label(right,text='⚠ Z задаёт глубину/прижим механического инструмента.\nНеверное значение может повредить стол.',foreground='#b45309',wraplength=300).pack(fill='x',pady=8)
         self.calib_label=ttk.Label(right,text='');self.calib_label.pack(fill='x',pady=5)
-        ttk.Button(right,text='Воздушный тест',command=lambda:self.export(air=True)).pack(fill='x',pady=5)
-        ttk.Button(right,text='Проверить и экспортировать',style='Danger.TButton',command=lambda:self.export(air=False)).pack(fill='x',pady=5)
+        ttk.Button(right,text='Мастер подготовки и запуска',style='Danger.TButton',command=self.launch_wizard).pack(fill='x',pady=6)
+        ttk.Button(right,text='Воздушный тест (быстрый экспорт)',command=lambda:self.export(air=True)).pack(fill='x',pady=3)
+        ttk.Button(right,text='Экспортировать задание',command=lambda:self.export(air=False)).pack(fill='x',pady=3)
         bottom=ttk.Frame(self,padding=(10,4));bottom.pack(fill='x');self.status=ttk.Label(bottom,text='');self.status.pack(side='left');self.warn=ttk.Label(bottom,text='',foreground='#b45309');self.warn.pack(side='right')
     def current_index(self):
         s=self.listbox.curselection();return s[0] if s else None
@@ -58,7 +68,7 @@ class App(tk.Tk):
         o=self.project.objects[i]
         for k in ('x','y','scale','rotation'):self.vars[k].set(getattr(o,'rotation_deg' if k=='rotation' else k))
     def checkpoint(self):
-        self.history.append(copy.deepcopy(self.project));self.history=self.history[-50:];self.future.clear()
+        self.history.append(copy.deepcopy(self.project));self.history=self.history[-50:];self.future.clear();self._air_test_exported=False
     def undo(self):
         if not self.history:return
         self.future.append(copy.deepcopy(self.project));self.project=self.history.pop();self.refresh_all()
@@ -76,3 +86,48 @@ class App(tk.Tk):
     def duplicate(self):
         i=self.current_index();
         if i is None:return
+        self.checkpoint();o=self.project.objects[i];d=SceneObject.from_dict(o.to_dict());d.name+=' копия';d.x+=5;d.y+=5;self.project.objects.append(d);self.refresh_all()
+    def duplicate_many(self):
+        i=self.current_index()
+        if i is None:return
+        n=simpledialog.askinteger('Дублирование','Сколько копий создать?',initialvalue=2,minvalue=1,maxvalue=100,parent=self)
+        if not n:return
+        self.checkpoint();base=self.project.objects[i]
+        for k in range(n):
+            d=SceneObject.from_dict(base.to_dict());d.name=f'{base.name} копия {k+1}';d.x+=(k+1)*5;d.y+=(k+1)*5;self.project.objects.append(d)
+        self.refresh_all()
+    def align(self,mode):
+        i=self.current_index()
+        if i is None:return
+        self.checkpoint();o=self.project.objects[i]
+        from .geometry import transformed_paths
+        ps=transformed_paths(o);x0,y0,x1,y1=bbox(ps);p=self.project.printer
+        l,b,r,t=p.safe_bounds
+        if mode=='center':o.x+=(l+r)/2-(x0+x1)/2;o.y+=(b+t)/2-(y0+y1)/2
+        elif mode=='left':o.x+=l-x0
+        self.refresh_all()
+
+    def delete(self):
+        i=self.current_index();
+        if i is not None:self.checkpoint();self.project.objects.pop(i);self.refresh_all()
+    def _run_background(self, title, fn, on_success):
+        if self._busy:
+            messagebox.showinfo('Novatech Cut','Сейчас уже выполняется обработка. Дождитесь её завершения.',parent=self)
+            return
+        self._busy=True
+        w=tk.Toplevel(self);self._busy_win=w;w.title(title);w.geometry('430x130');w.transient(self);w.resizable(False,False)
+        ttk.Label(w,text=title,style='Title.TLabel').pack(anchor='w',padx=16,pady=(16,6))
+        ttk.Label(w,text='Окно можно перемещать — интерфейс не должен зависать.').pack(anchor='w',padx=16)
+        bar=ttk.Progressbar(w,mode='indeterminate');bar.pack(fill='x',padx=16,pady=14);bar.start(12)
+        w.protocol('WM_DELETE_WINDOW',lambda:None)
+
+        results=queue.Queue(maxsize=1);started=time.monotonic();timed_out={'value':False}
+        def worker():
+            try:results.put((fn(),None))
+            except Exception as exc:results.put((None,exc))
+        def poll():
+            try:result,error=results.get_nowait()
+            except queue.Empty:
+                elapsed=time.monotonic()-started
+                if elapsed>45:
+                    timed_out['value']=True;self._busy=False;self._busy_win=None
