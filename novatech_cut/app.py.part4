@@ -1,12 +1,3 @@
-                    ok,msg=self._placement_ok()
-                    if not ok:messagebox.showwarning('Размещение','Объект выходит за безопасную область. Перетащите его на поле или используйте кнопку центрирования.',parent=w);return
-                if i==2:
-                    try:apply_settings()
-                    except Exception as exc:messagebox.showerror('Параметры',str(exc),parent=w);return
-                if i==3 and not self.project.printer.calibrated:messagebox.showwarning('Калибровка','Сначала завершите калибровку профиля A1 + UMTS.',parent=w);return
-                if i==4 and not self._air_test_exported:messagebox.showwarning('Воздушный тест','Сначала сохраните и проверьте воздушный тест.',parent=w);return
-                if i==len(titles)-1:w.destroy();return
-            step['i']=max(0,min(len(titles)-1,i+delta));render()
         back.config(command=lambda:go(-1));nextb.config(command=lambda:go(1))
         def closed():self._wizard=None;w.destroy()
         w.protocol('WM_DELETE_WINDOW',closed);render()
@@ -97,14 +88,27 @@ Esc — отмена
             g,stats=generate_gcode(paths,self.project.printer,self.project.material,air_test=air)
             ext='.airtest.gcode.3mf' if air else '.gcode.3mf';f=filedialog.asksaveasfilename(defaultextension=ext,filetypes=[('Bambu G-code 3MF','*.gcode.3mf'),('G-code','*.gcode')])
             if not f:return None
-            if f.lower().endswith('.3mf'):build_gcode_3mf(f,g,stats,self.project.printer.name)
-            else:Path(f).write_text(g,encoding='utf-8')
-            report=Path(f+'.report.json');report.write_text(json.dumps({'air_test':air,'material':self.project.material.to_dict(),'printer':self.project.printer.to_dict(),'cut_length_mm':stats.cut_length_mm,'travel_length_mm':stats.travel_length_mm,'estimated_seconds':stats.estimated_seconds,'bounds':stats.bounds,'passes':stats.passes},ensure_ascii=False,indent=2),encoding='utf-8')
+            orca_preview=None;raw_gcode=None
+            if f.lower().endswith('.3mf'):
+                build_gcode_3mf(f,g,stats,self.project.printer.name)
+                base=str(Path(f))
+                if base.lower().endswith('.gcode.3mf'):root=base[:-10]
+                else:root=str(Path(base).with_suffix(''))
+                raw_gcode=root+'.gcode'
+                Path(raw_gcode).write_text(g,encoding='utf-8')
+                orca_preview=root+'_ORCA_PREVIEW.3mf'
+                build_orca_preview_3mf(orca_preview,paths)
+            else:
+                Path(f).write_text(g,encoding='utf-8');raw_gcode=f
+            report=Path(f+'.report.json');report.write_text(json.dumps({'air_test':air,'material':self.project.material.to_dict(),'printer':self.project.printer.to_dict(),'cut_length_mm':stats.cut_length_mm,'travel_length_mm':stats.travel_length_mm,'estimated_seconds':stats.estimated_seconds,'bounds':stats.bounds,'passes':stats.passes,'orca_preview':orca_preview,'raw_gcode':raw_gcode},ensure_ascii=False,indent=2),encoding='utf-8')
             self.last_export_path=f
             if air:self._air_test_exported=True
             if show_message:
                 kind='воздушный тест' if air else 'задание'
-                messagebox.showinfo('Экспорт',f'Готово: {kind}.\n{f}\n\nФайл не отправляется на принтер автоматически — дальнейшие шаги есть в «Мастере подготовки и запуска».')
+                extra=''
+                if orca_preview:
+                    extra=f'\n\nДля A1: {f}\nДля просмотра формы в Orca: {orca_preview}\nСырой G-code для анализа в Orca: {raw_gcode}'
+                messagebox.showinfo('Экспорт',f'Готово: {kind}.{extra}\n\nФайл *_ORCA_PREVIEW.3mf — только визуальная геометрия, на принтер его отправлять нельзя.')
             return f
         except Exception as e:
             messagebox.showerror('Экспорт заблокирован',str(e));return None
