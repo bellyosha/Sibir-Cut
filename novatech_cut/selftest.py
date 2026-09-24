@@ -61,6 +61,14 @@ def _file_detection_regression_test(td: str) -> None:
     fake_svg.write_bytes(png.read_bytes())
     if detect_import_kind(str(fake_svg))!='raster': raise RuntimeError('Mislabeled PNG-as-SVG detection failed')
     if not import_paths(str(fake_svg),threshold=128,external_only=True,smoothing=1.0): raise RuntimeError('Mislabeled PNG-as-SVG import failed')
+    # Regression for AI-generated PNG/JUMBF files that contain an embedded
+    # SVG snippet in metadata. The PNG signature must win.
+    png_with_svg_meta=unicode_dir/'chatgpt-image.svg'
+    png_with_svg_meta.write_bytes(png.read_bytes()+b'image/svg+xml<svg width="64" height="64"></svg>')
+    if detect_import_kind(str(png_with_svg_meta))!='raster':
+        raise RuntimeError('PNG with embedded SVG metadata was misdetected as SVG')
+    if not import_paths(str(png_with_svg_meta),threshold=128,external_only=True,smoothing=1.0):
+        raise RuntimeError('PNG with embedded SVG metadata import failed')
     real_svg=unicode_dir/'вектор.png'
     real_svg.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="30mm" viewBox="0 0 40 30"><rect x="2" y="2" width="30" height="20"/></svg>',encoding='utf-8')
     if detect_import_kind(str(real_svg))!='svg': raise RuntimeError('SVG content detection failed')
