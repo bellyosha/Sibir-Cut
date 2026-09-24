@@ -7,7 +7,7 @@ from pathlib import Path
 from .geometry import path_length, load_raster, _morphological_skeleton, hatch_fill_paths
 from .gcode import generate_gcode, validate_gcode
 from .models import Project, SceneObject
-from .pack3mf import build_gcode_3mf, inspect_gcode_3mf
+from .pack3mf import build_gcode_3mf, inspect_gcode_3mf, build_orca_preview_3mf, inspect_orca_preview_3mf
 from .pipeline import prepare_paths, import_paths, detect_import_kind
 
 def _raster_regression_test(td: str) -> None:
@@ -159,6 +159,10 @@ def run_self_test() -> None:
         build_gcode_3mf(out, gcode, stats, profile_name=project.printer.name)
         if inspect_gcode_3mf(out) is not True:
             raise RuntimeError("Self-test 3MF inspection failed")
+        preview=Path(td)/"selftest_ORCA_PREVIEW.3mf"
+        build_orca_preview_3mf(preview,paths)
+        if inspect_orca_preview_3mf(preview) is not True:
+            raise RuntimeError("Orca preview 3MF inspection failed")
         _raster_regression_test(td)
         _file_detection_regression_test(td)
         _transparent_png_thread_regression_test(td)
