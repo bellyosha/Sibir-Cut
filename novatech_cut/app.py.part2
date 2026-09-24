@@ -1,13 +1,3 @@
-        threading.Thread(target=worker,daemon=True).start()
-        self.after(50,poll)
-
-    def do_import(self):
-        f=filedialog.askopenfilename(filetypes=[('Поддерживаемые','*.svg *.dxf *.png *.jpg *.jpeg *.bmp *.webp'),('Все файлы','*.*')])
-        if not f:return
-        try:
-            detected_kind=detect_import_kind(f)
-        except Exception as exc:
-            messagebox.showerror('Импорт',str(exc),parent=self);return
         opts={};is_raster=detected_kind=='raster'
         if is_raster:
             th=simpledialog.askinteger('Векторизация','Порог 0–255:',initialvalue=128,minvalue=0,maxvalue=255,parent=self)
@@ -145,3 +135,23 @@
             if path and sample[-1]!=path[-1]:sample=sample+[path[-1]]
             for x,y in sample:xy+=pt(x,y)
             if len(xy)>=4:c.create_line(*xy,fill='#dc2626',width=2)
+            if len(path)>=2 and idx<=300:
+                q0=pt(*path[0]);q1=pt(*path[min(1,len(path)-1)]);c.create_line(*q0,*q1,fill='#dc2626',width=2,arrow='last')
+                c.create_text(q0[0]+5,q0[1]-5,text=str(idx),anchor='sw',fill='#7f1d1d')
+            prev=path[-1]
+        sel=self.current_index()
+        if sel is not None and sel<len(self.project.objects):
+            x0s,y0s,x1s,y1s=self._object_bounds(self.project.objects[sel]);A=pt(x0s,y1s);B=pt(x1s,y0s)
+            c.create_rectangle(A[0],A[1],B[0],B[1],outline='#16a34a',dash=(6,3),width=2)
+        c.create_text(ox+8,oy+8,text='Bambu Lab A1 — 256 × 256 мм   •   ЛКМ: выбрать и перетащить',anchor='nw',fill='#334155')
+    def update_status(self):
+        try:
+            if self.prepare_error:
+                self.status.config(text=self.prepare_error);self.warn.config(text='');return
+            paths=self.prepared_paths;b=bbox(paths);length=sum(path_length(p) for p in paths);m=self.project.material
+            est=length/max(0.1,m.work_speed)*max(1,m.passes);kind='рисования' if m.mode=='Рисование' else 'реза';self.status.config(text=f'Траекторий: {len(paths)}   Длина {kind}: {length:.1f} мм   ≈ {est:.0f} с   Границы: {b[0]:.1f},{b[1]:.1f} — {b[2]:.1f},{b[3]:.1f} мм')
+            l,bb,r,t=self.project.printer.safe_bounds;bad=bool(paths) and (b[0]<l or b[1]<bb or b[2]>r or b[3]>t);self.warn.config(text='⚠ Выход за безопасную область' if bad else '')
+        except Exception as e:self.status.config(text=str(e));self.warn.config(text='')
+    def save_project(self):
+        self.sync_material();f=self.current_file or filedialog.asksaveasfilename(defaultextension='.ncut',filetypes=[('Novatech Cut project','*.ncut')]);
+        if f:save_project(self.project,f);self.current_file=f
