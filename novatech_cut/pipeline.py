@@ -1,5 +1,5 @@
 from pathlib import Path
-from .geometry import load_svg, load_dxf, load_raster, remove_duplicate_paths, join_close_endpoints, simplify_path, optimize_order, compensate_dragknife, transformed_paths
+from .geometry import load_svg, load_dxf, load_raster, remove_duplicate_paths, join_close_endpoints, simplify_path, optimize_order, compensate_dragknife, transformed_paths, hatch_fill_paths
 
 RASTER_EXTENSIONS={'.png','.jpg','.jpeg','.bmp','.webp'}
 
@@ -54,14 +54,34 @@ def import_paths(filename, **raster_opts):
 
 def prepare_paths(objects, material, join_tolerance=0.05, simplify_tolerance=0.03):
     paths=[]
-    for obj in objects:paths.extend(transformed_paths(obj))
+    for obj in objects:
+        paths.extend(transformed_paths(obj))
     paths=remove_duplicate_paths(paths)
     paths=join_close_endpoints(paths,join_tolerance)
-    paths=[simplify_path(p,simplify_tolerance) for p in paths]
-    paths=optimize_order(paths)
-    if material.mode=='Резка' and material.blade_offset>0:
-        paths=[compensate_dragknife(p,material.blade_offset,material.overcut) for p in paths]
-    if material.mirror_x:
+    paths=[simplify_path(p,simplify_tolerance) for p in paths if len(p)>=2]
+
+    if material.mode=='Рисование':
+        style=getattr(material,'drawing_style','Контур + заливка')
+        fill=[]
+        if style in ('Контур + заливка','Только заливка'):
+            fill=hatch_fill_paths(
+                paths,
+                spacing=max(0.1,getattr(material,'fill_spacing',1.0)),
+                angle_deg=getattr(material,'fill_angle',45.0),
+                inset=max(0.0,getattr(material,'fill_inset',0.0)),
+                crosshatch=bool(getattr(material,'fill_crosshatch',False)),
+            )
+        if style=='Только заливка':
+            paths=fill
+        elif style=='Контур + заливка':
+            paths=paths+fill
+        paths=optimize_order(paths)
+    else:
+        paths=optimize_order(paths)
+        if material.blade_offset>0:
+            paths=[compensate_dragknife(p,material.blade_offset,material.overcut) for p in paths]
+
+    if material.mirror_x and paths:
         from .geometry import bbox
         x0,_,x1,_=bbox(paths);cx=(x0+x1)/2
         paths=[[(2*cx-x,y) for x,y in p] for p in paths]
