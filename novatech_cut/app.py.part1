@@ -6,10 +6,10 @@ from .models import Project, SceneObject, DEFAULT_MATERIALS, MaterialProfile
 from .pipeline import import_paths, prepare_paths, detect_import_kind
 from .geometry import bbox, path_length, transformed_paths
 from .gcode import generate_gcode, GCodeError
-from .pack3mf import build_gcode_3mf
+from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.2.4'
+APP_TITLE='Novatech Cut 0.2.5'
 
 class App(tk.Tk):
     def __init__(self):
@@ -155,3 +155,6 @@ class App(tk.Tk):
             detected_kind=detect_import_kind(f)
         except Exception as exc:
             messagebox.showerror('Импорт',str(exc),parent=self);return
+        opts={};is_raster=detected_kind=='raster'
+        if is_raster:
+            th=simpledialog.askinteger('Векторизация','Порог 0–255:',initialvalue=128,minvalue=0,maxvalue=255,parent=self)
