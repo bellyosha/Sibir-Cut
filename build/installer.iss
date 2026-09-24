@@ -1,5 +1,5 @@
 #define MyAppName "Novatech Cut"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppExeName "NovatechCut.exe"
 
 [Setup]
@@ -9,7 +9,7 @@ AppVersion={#MyAppVersion}
 DefaultDirName={localappdata}\Programs\Novatech Cut
 DefaultGroupName=Novatech Cut
 OutputDir=..\dist
-OutputBaseFilename=Novatech_Cut_Setup_0.1.0_x64
+OutputBaseFilename=Novatech_Cut_Setup_0.1.1_x64
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
