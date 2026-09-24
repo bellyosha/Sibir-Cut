@@ -4,7 +4,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
-from .geometry import path_length, load_raster, _morphological_skeleton
+from .geometry import path_length, load_raster, _morphological_skeleton, hatch_fill_paths
 from .gcode import generate_gcode, validate_gcode
 from .models import Project, SceneObject
 from .pack3mf import build_gcode_3mf, inspect_gcode_3mf
@@ -125,6 +125,22 @@ def _centerline_completeness_regression_test() -> None:
     if xs.size==0 or (xs.max()-xs.min())<250 or (ys.max()-ys.min())<150:
         raise RuntimeError('Centerline skeleton does not cover the source glyphs')
 
+def _drawing_fill_regression_test() -> None:
+    outer=[(0.0,0.0),(40.0,0.0),(40.0,40.0),(0.0,40.0),(0.0,0.0)]
+    hole=[(12.0,12.0),(28.0,12.0),(28.0,28.0),(12.0,28.0),(12.0,12.0)]
+    fill=hatch_fill_paths([outer,hole],spacing=2.0,angle_deg=0.0,inset=0.0,crosshatch=False)
+    if len(fill)<10:
+        raise RuntimeError('Drawing hatch fill produced too few lines')
+    for seg in fill:
+        if len(seg)<2: continue
+        mx=(seg[0][0]+seg[-1][0])/2;my=(seg[0][1]+seg[-1][1])/2
+        if 12.01<mx<27.99 and 12.01<my<27.99:
+            raise RuntimeError('Drawing hatch crossed an inner hole')
+    project=Project();project.material.mode='Рисование';project.material.drawing_style='Контур + заливка';project.material.fill_spacing=2.0;project.objects=[SceneObject('donut',[outer,hole])]
+    prepared=prepare_paths(project.objects,project.material)
+    if len(prepared)<=2:
+        raise RuntimeError('Drawing pipeline did not add fill paths')
+
 def run_self_test() -> None:
     project = Project()
     project.printer.calibrated = True
@@ -147,6 +163,7 @@ def run_self_test() -> None:
         _file_detection_regression_test(td)
         _transparent_png_thread_regression_test(td)
         _centerline_completeness_regression_test()
+        _drawing_fill_regression_test()
 
 def main() -> int:
     try:
