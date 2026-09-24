@@ -1,6 +1,3 @@
-        opts={};is_raster=detected_kind=='raster'
-        if is_raster:
-            th=simpledialog.askinteger('Векторизация','Порог 0–255:',initialvalue=128,minvalue=0,maxvalue=255,parent=self)
             if th is None:return
             sm=simpledialog.askfloat('Векторизация','Сглаживание (0–5):',initialvalue=1.0,minvalue=0,maxvalue=5,parent=self)
             if sm is None:return
@@ -155,3 +152,9 @@
     def save_project(self):
         self.sync_material();f=self.current_file or filedialog.asksaveasfilename(defaultextension='.ncut',filetypes=[('Novatech Cut project','*.ncut')]);
         if f:save_project(self.project,f);self.current_file=f
+    def open_project(self):
+        f=filedialog.askopenfilename(filetypes=[('Novatech Cut project','*.ncut')]);
+        if f:
+            try:self.project=load_project(f);self.current_file=f;self.refresh_all()
+            except Exception as e:messagebox.showerror('Проект',str(e))
+    def printer_profile(self):
