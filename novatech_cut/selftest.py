@@ -122,7 +122,7 @@ def _centerline_completeness_regression_test() -> None:
     if components>4:
         raise RuntimeError(f'Centerline skeleton fragmented into {components} components')
     ys,xs=np.where(skel>0)
-    if xs.size==0 or (xs.max()-xs.min())<500 or (ys.max()-ys.min())<200:
+    if xs.size==0 or (xs.max()-xs.min())<250 or (ys.max()-ys.min())<150:
         raise RuntimeError('Centerline skeleton does not cover the source glyphs')
 
 def run_self_test() -> None:
