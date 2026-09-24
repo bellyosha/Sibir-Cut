@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, math, os, sys, copy, threading, tkinter as tk
+import json, math, os, sys, copy, threading, queue, tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
 from .models import Project, SceneObject, DEFAULT_MATERIALS, MaterialProfile
