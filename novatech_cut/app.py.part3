@@ -1,21 +1,3 @@
-    def draw(self):
-        c=self.canvas;c.delete('all');ox,oy=self.origin;z=self.zoom;p=self.project.printer
-        def pt(x,y):return ox+x*z, oy+(p.bed_height-y)*z
-        x0,y0=pt(0,p.bed_height);x1,y1=pt(p.bed_width,0);c.create_rectangle(x0,y0,x1,y1,fill='white',outline='#64748b',width=2)
-        for x in range(0,257,10):
-            a=pt(x,0);b=pt(x,p.bed_height);c.create_line(*a,*b,fill='#e2e8f0')
-        for y in range(0,257,10):
-            a=pt(0,y);b=pt(p.bed_width,y);c.create_line(*a,*b,fill='#e2e8f0')
-        l,bm,r,t=p.safe_bounds
-        A=pt(0,p.bed_height);B=pt(p.bed_width,t);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
-        A=pt(0,bm);B=pt(p.bed_width,0);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
-        A=pt(0,t);B=pt(l,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
-        A=pt(r,t);B=pt(p.bed_width,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
-        a=pt(l,bm);bb=pt(r,t);c.create_rectangle(a[0],bb[1],bb[0],a[1],outline='#64748b',dash=(5,4),width=2)
-        if self._drag_active:
-            paths=[]
-            for obj in self.project.objects:paths.extend(transformed_paths(obj))
-        else:
             paths=self.prepared_paths
         prev=None
         for idx,path in enumerate(paths,1):
@@ -131,3 +113,30 @@
             prof=next((x for x in DEFAULT_MATERIALS if x.name==wmat.get()),None)
             if prof:self.project.material=MaterialProfile.from_dict(prof.to_dict())
             mm=self.project.material;mm.name=wmat.get();mm.mode=wm.get();mm.passes=max(1,wpasses.get());mm.work_speed=max(0.1,wspeed.get());mm.blade_offset=max(0,wblade.get());mm.overcut=max(0,wover.get());mm.drawing_style=wstyle.get();mm.fill_spacing=max(0.1,wspacing.get());mm.fill_angle=wangle.get();mm.fill_crosshatch=bool(wcross.get());mm.fill_inset=max(0,winset.get())
+            self._air_test_exported=False;self.refresh_all()
+        def center_selected():
+            if not self.project.objects:return
+            if self.current_index() is None:self.listbox.selection_set(0);self.listbox.activate(0)
+            self.align('center');render()
+        def open_export_folder():
+            if not self.last_export_path:
+                messagebox.showinfo('Папка','Сначала экспортируйте файл.',parent=w);return
+            folder=str(Path(self.last_export_path).parent)
+            try:os.startfile(folder)
+            except Exception as exc:messagebox.showerror('Папка',str(exc),parent=w)
+
+        def render():
+            clear();i=step['i'];step_label.config(text=f'Шаг {i+1} из {len(titles)} — {titles[i]}')
+            back.config(state='normal' if i>0 else 'disabled');nextb.config(text='Готово' if i==len(titles)-1 else 'Далее →')
+            if i==0:
+                desc.config(text='Сначала нужен объект для резки или рисования.')
+                if self.project.objects:note(f'✓ Загружено объектов: {len(self.project.objects)}','ok')
+                else:note('Файл ещё не загружен. Нажмите «Импорт» в главном окне или кнопку ниже.','bad')
+                ttk.Button(body,text='Импортировать файл…',command=self.do_import).pack(anchor='w',pady=10)
+                note('Для растровой картинки выбирайте «Нет» на вопрос про осевые линии, если нужно вырезать контур или полностью закрашивать фигуру.')
+            elif i==1:
+                desc.config(text='Разместите объект на столе. Теперь его можно хватать левой кнопкой мыши прямо в главном координатном поле и перетаскивать.')
+                ok,msg=self._placement_ok();note(('✓ ' if ok else '⚠ ')+msg,'ok' if ok else 'warn')
+                note('Окно мастера не блокирует главное окно: потяните объект мышкой. Зелёная пунктирная рамка показывает выбранный объект. Точные X/Y остаются слева.')
+                ttk.Button(body,text='Поставить выбранный объект по центру',command=center_selected).pack(anchor='w',pady=8)
+                ttk.Button(body,text='Обновить проверку размещения',command=render).pack(anchor='w')
