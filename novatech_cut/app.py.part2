@@ -1,48 +1,3 @@
-        self.checkpoint();o=self.project.objects[i];d=SceneObject.from_dict(o.to_dict());d.name+=' копия';d.x+=5;d.y+=5;self.project.objects.append(d);self.refresh_all()
-    def duplicate_many(self):
-        i=self.current_index()
-        if i is None:return
-        n=simpledialog.askinteger('Дублирование','Сколько копий создать?',initialvalue=2,minvalue=1,maxvalue=100,parent=self)
-        if not n:return
-        self.checkpoint();base=self.project.objects[i]
-        for k in range(n):
-            d=SceneObject.from_dict(base.to_dict());d.name=f'{base.name} копия {k+1}';d.x+=(k+1)*5;d.y+=(k+1)*5;self.project.objects.append(d)
-        self.refresh_all()
-    def align(self,mode):
-        i=self.current_index()
-        if i is None:return
-        self.checkpoint();o=self.project.objects[i]
-        from .geometry import transformed_paths
-        ps=transformed_paths(o);x0,y0,x1,y1=bbox(ps);p=self.project.printer
-        l,b,r,t=p.safe_bounds
-        if mode=='center':o.x+=(l+r)/2-(x0+x1)/2;o.y+=(b+t)/2-(y0+y1)/2
-        elif mode=='left':o.x+=l-x0
-        self.refresh_all()
-
-    def delete(self):
-        i=self.current_index();
-        if i is not None:self.checkpoint();self.project.objects.pop(i);self.refresh_all()
-    def _run_background(self, title, fn, on_success):
-        if self._busy:
-            messagebox.showinfo('Novatech Cut','Сейчас уже выполняется обработка. Дождитесь её завершения.',parent=self)
-            return
-        self._busy=True
-        w=tk.Toplevel(self);self._busy_win=w;w.title(title);w.geometry('430x130');w.transient(self);w.resizable(False,False)
-        ttk.Label(w,text=title,style='Title.TLabel').pack(anchor='w',padx=16,pady=(16,6))
-        ttk.Label(w,text='Окно можно перемещать — интерфейс не должен зависать.').pack(anchor='w',padx=16)
-        bar=ttk.Progressbar(w,mode='indeterminate');bar.pack(fill='x',padx=16,pady=14);bar.start(12)
-        w.protocol('WM_DELETE_WINDOW',lambda:None)
-
-        results=queue.Queue(maxsize=1);started=time.monotonic();timed_out={'value':False}
-        def worker():
-            try:results.put((fn(),None))
-            except Exception as exc:results.put((None,exc))
-        def poll():
-            try:result,error=results.get_nowait()
-            except queue.Empty:
-                elapsed=time.monotonic()-started
-                if elapsed>45:
-                    timed_out['value']=True;self._busy=False;self._busy_win=None
                     try:bar.stop();w.destroy()
                     except Exception:pass
                     messagebox.showerror(title,'Обработка превысила 45 секунд и остановлена для интерфейса. Закройте приложение и пришлите проблемный файл — такая операция не должна длиться так долго.',parent=self)
@@ -74,8 +29,8 @@
             sm=simpledialog.askfloat('Векторизация','Сглаживание (0–5):',initialvalue=1.0,minvalue=0,maxvalue=5,parent=self)
             if sm is None:return
             inv=messagebox.askyesno('Векторизация','Инвертировать изображение?',parent=self)
-            center=messagebox.askyesno('Векторизация','Режим центральных линий?\nДа — рисование ручкой/маркером.\nНет — контур резки.',parent=self)
-            opts={'threshold':th,'external_only':not center,'smoothing':sm,'invert':inv,'centerline':center}
+            center=messagebox.askyesno('Тип изображения','Это тонкий линейный рисунок, где нужна ОДНА линия по середине штриха?\n\nДа — построить осевые линии.\nНет — считать чёрное заполненной фигурой (правильно для резки и закрашивания).',parent=self,default='no')
+            opts={'threshold':th,'external_only':False,'smoothing':sm,'invert':inv,'centerline':center}
 
         def imported(paths):
             if not paths:
@@ -83,7 +38,9 @@
             if is_raster and not self.preview_paths_modal(paths):
                 return
             self.checkpoint();x0,y0,x1,y1=bbox(paths)
-            o=SceneObject(Path(f).name,paths,x=10-x0,y=10-y0,source=f)
+            l,b,r,t=self.project.printer.safe_bounds;ww=max(0.001,x1-x0);hh=max(0.001,y1-y0)
+            fit=max(0.001,min(1.0,(r-l-10.0)/ww,(t-b-10.0)/hh))
+            o=SceneObject(Path(f).name,paths,x=(l+5)-x0*fit,y=(b+5)-y0*fit,scale=fit,source=f)
             self.project.objects.append(o)
             def prepared(paths2):
                 self.prepared_paths=paths2;self.prepare_error=None
@@ -115,11 +72,21 @@
 
     def select_material(self):
         name=self.material_var.get();m=next((x for x in DEFAULT_MATERIALS if x.name==name),None)
-        if m:self.project.material=MaterialProfile.from_dict(m.to_dict());self.refresh_all()
+        if m:
+            self.project.material=MaterialProfile.from_dict(m.to_dict());self._air_test_exported=False;self.refresh_all()
+    def apply_job_settings(self):
+        try:
+            self.sync_material();self._air_test_exported=False;self.refresh_all()
+        except Exception as exc:
+            messagebox.showerror('Параметры',str(exc),parent=self)
+    def on_mode_changed(self):
+        self.apply_job_settings()
     def sync_material(self):
-        m=self.project.material;m.mode=self.mode.get();m.passes=max(1,self.passes.get());m.work_speed=self.work_speed.get();m.travel_speed=self.travel_speed.get();m.work_z=self.work_z.get();m.safe_z=self.safe_z.get();m.blade_offset=max(0,self.blade_offset.get());m.overcut=max(0,self.overcut.get())
+        m=self.project.material;m.mode=self.mode.get();m.passes=max(1,self.passes.get());m.work_speed=max(0.1,self.work_speed.get());m.travel_speed=max(0.1,self.travel_speed.get());m.work_z=self.work_z.get();m.safe_z=self.safe_z.get();m.blade_offset=max(0,self.blade_offset.get());m.overcut=max(0,self.overcut.get())
+        m.drawing_style=self.drawing_style.get() or 'Контур + заливка';m.fill_spacing=max(0.1,self.fill_spacing.get());m.fill_angle=self.fill_angle.get();m.fill_crosshatch=bool(self.fill_crosshatch.get());m.fill_inset=max(0.0,self.fill_inset.get())
     def refresh_fields(self):
         m=self.project.material;self.material_var.set(m.name);self.mode.set(m.mode);self.passes.set(m.passes);self.work_speed.set(m.work_speed);self.travel_speed.set(m.travel_speed);self.work_z.set(m.work_z);self.safe_z.set(m.safe_z);self.blade_offset.set(m.blade_offset);self.overcut.set(m.overcut)
+        self.drawing_style.set(getattr(m,'drawing_style','Контур + заливка'));self.fill_spacing.set(getattr(m,'fill_spacing',1.0));self.fill_angle.set(getattr(m,'fill_angle',45.0));self.fill_crosshatch.set(bool(getattr(m,'fill_crosshatch',False)));self.fill_inset.set(getattr(m,'fill_inset',0.2))
         self.calib_label.config(text='Профиль A1: ОТКАЛИБРОВАН' if self.project.printer.calibrated else 'Профиль A1: НЕ ОТКАЛИБРОВАН — экспорт заблокирован',foreground='#15803d' if self.project.printer.calibrated else '#b91c1c')
     def _rebuild_prepared(self):
         try:
@@ -127,32 +94,40 @@
         except Exception as exc:
             self.prepared_paths=[];self.prepare_error=str(exc)
     def refresh_all(self):
-        self._rebuild_prepared();self.listbox.delete(0,'end');[self.listbox.insert('end',o.name) for o in self.project.objects];self.refresh_fields();self.draw();self.update_status()
+        sel=self.current_index();self._rebuild_prepared();self.listbox.delete(0,'end');[self.listbox.insert('end',o.name) for o in self.project.objects]
+        if sel is not None and sel<len(self.project.objects):self.listbox.selection_set(sel);self.listbox.activate(sel)
+        self.refresh_fields();self.draw();self.update_status()
+    def _canvas_to_bed(self,cx,cy):
+        ox,oy=self.origin;z=self.zoom;p=self.project.printer
+        return ((cx-ox)/z, p.bed_height-(cy-oy)/z)
+    def _object_bounds(self,obj):
+        try:return bbox(transformed_paths(obj))
+        except Exception:return (0,0,0,0)
+    def on_canvas_press(self,event):
+        x,y=self._canvas_to_bed(event.x,event.y);hit=None
+        for i in range(len(self.project.objects)-1,-1,-1):
+            x0,y0,x1,y1=self._object_bounds(self.project.objects[i])
+            if x0-2<=x<=x1+2 and y0-2<=y<=y1+2:
+                hit=i;break
+        if hit is None:
+            self.listbox.selection_clear(0,'end');self._drag=None;self.draw();return
+        self.listbox.selection_clear(0,'end');self.listbox.selection_set(hit);self.listbox.activate(hit);self.load_obj_fields()
+        self.checkpoint();o=self.project.objects[hit]
+        self._drag={'index':hit,'start_pointer':(x,y),'start_xy':(o.x,o.y)};self._drag_active=True
+    def on_canvas_drag(self,event):
+        if not self._drag:return
+        i=self._drag['index']
+        if i>=len(self.project.objects):return
+        x,y=self._canvas_to_bed(event.x,event.y);sx,sy=self._drag['start_pointer'];ox0,oy0=self._drag['start_xy'];o=self.project.objects[i]
+        o.x=ox0+(x-sx);o.y=oy0+(y-sy)
+        x0,y0,x1,y1=self._object_bounds(o);l,b,r,t=self.project.printer.safe_bounds
+        if x0<l:o.x+=l-x0
+        if x1>r:o.x-=x1-r
+        if y0<b:o.y+=b-y0
+        if y1>t:o.y-=y1-t
+        self.vars['x'].set(round(o.x,3));self.vars['y'].set(round(o.y,3));self.draw()
+    def on_canvas_release(self,event):
+        if not self._drag:return
+        self._drag=None;self._drag_active=False;self.refresh_all()
     def set_zoom(self,z):self.zoom=max(0.4,min(8,z));self.draw()
     def on_wheel(self,e):self.set_zoom(self.zoom*(1.12 if e.delta>0 else 1/1.12))
-    def draw(self):
-        c=self.canvas;c.delete('all');ox,oy=self.origin;z=self.zoom;p=self.project.printer
-        def pt(x,y):return ox+x*z, oy+(p.bed_height-y)*z
-        x0,y0=pt(0,p.bed_height);x1,y1=pt(p.bed_width,0);c.create_rectangle(x0,y0,x1,y1,fill='white',outline='#64748b',width=2)
-        for x in range(0,257,10):
-            a=pt(x,0);b=pt(x,p.bed_height);c.create_line(*a,*b,fill='#e2e8f0')
-        for y in range(0,257,10):
-            a=pt(0,y);b=pt(p.bed_width,y);c.create_line(*a,*b,fill='#e2e8f0')
-        l,bm,r,t=p.safe_bounds
-        A=pt(0,p.bed_height);B=pt(p.bed_width,t);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
-        A=pt(0,bm);B=pt(p.bed_width,0);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
-        A=pt(0,t);B=pt(l,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
-        A=pt(r,t);B=pt(p.bed_width,bm);c.create_rectangle(A[0],A[1],B[0],B[1],fill='#e5e7eb',outline='')
-        a=pt(l,bm);bb=pt(r,t);c.create_rectangle(a[0],bb[1],bb[0],a[1],outline='#64748b',dash=(5,4),width=2)
-        paths=self.prepared_paths
-        prev=None
-        for idx,path in enumerate(paths,1):
-            if not path:continue
-            if prev is not None:
-                a=pt(*prev);bq=pt(*path[0]);c.create_line(*a,*bq,fill='#2563eb',dash=(4,3),width=1)
-            xy=[];step=max(1,len(path)//1200);sample=path[::step]
-            if path and sample[-1]!=path[-1]:sample=sample+[path[-1]]
-            for x,y in sample:xy+=pt(x,y)
-            if len(xy)>=4:c.create_line(*xy,fill='#dc2626',width=2)
-            if len(path)>=2 and idx<=300:
-                q0=pt(*path[0]);q1=pt(*path[min(1,len(path)-1)]);c.create_line(*q0,*q1,fill='#dc2626',width=2,arrow='last')
