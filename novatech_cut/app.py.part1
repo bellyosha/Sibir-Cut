@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, math, os, sys, copy, tkinter as tk
+import json, math, os, sys, copy, threading, tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
 from .models import Project, SceneObject, DEFAULT_MATERIALS, MaterialProfile
@@ -15,6 +15,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__(); self.title(APP_TITLE); self.geometry('1400x850'); self.minsize(1050,680)
         self.project=Project();self.current_file=None;self.zoom=2.2;self.origin=(28,28);self.history=[];self.future=[]
+        self.prepared_paths=[];self.prepare_error=None;self._busy=False;self._busy_win=None
         self._style();self._build();self.refresh_all()
     def _style(self):
         s=ttk.Style(self); 
