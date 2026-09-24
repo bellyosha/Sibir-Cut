@@ -1,0 +1,131 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct GUI source
+        shell: pwsh
+        run: |
+          $parts = 1..4 | ForEach-Object { Get-Content ("novatech_cut/app.py.part" + $_) -Raw }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "novatech_cut/app.py"),
+            ($parts -join ""),
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          if (!(Test-Path "novatech_cut/app.py")) { throw "app.py reconstruction failed" }
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-windows.txt
+
+      - name: Validate source
+        run: |
+          python -m compileall -q novatech_cut
+          python -m novatech_cut --self-test
+          python -c "import novatech_cut.app; print('GUI import OK')"
+
+      - name: Build Windows EXE
+        run: python -m PyInstaller --noconfirm --clean build/NovatechCut.spec
+
+      - name: Test frozen EXE
+        shell: pwsh
+        run: |
+          if (!(Test-Path "dist/NovatechCut.exe")) { throw "NovatechCut.exe was not created" }
+          $p = Start-Process -FilePath (Resolve-Path "dist/NovatechCut.exe") -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Frozen EXE self-test failed: exit $($p.ExitCode)" }
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          Remove-Item portable -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force portable,portable/docs | Out-Null
+          Copy-Item dist/NovatechCut.exe portable/
+          Copy-Item docs/*.md portable/docs/
+          Copy-Item README.md,LICENSE.txt,THIRD_PARTY_NOTICES.md portable/
+          Compress-Archive portable/* dist/Novatech_Cut_Portable_Windows_x64.zip -Force
+
+      - name: Test portable ZIP
+        shell: pwsh
+        run: |
+          Remove-Item portable-test -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive dist/Novatech_Cut_Portable_Windows_x64.zip portable-test -Force
+          $p = Start-Process -FilePath (Resolve-Path "portable-test/NovatechCut.exe") -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Portable EXE self-test failed: exit $($p.ExitCode)" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -notin @(0,1641,3010)) { exit $LASTEXITCODE }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "build\installer.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path "dist/Novatech_Cut_Setup_0.1.0_x64.exe")) { throw "Installer was not created" }
+
+      - name: Test installer on clean directory
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "NovatechCutInstalled"
+          $setup = Resolve-Path "dist/Novatech_Cut_Setup_0.1.0_x64.exe"
+          $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART",("/DIR=" + $installDir) -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer failed: exit $($p.ExitCode)" }
+          $installedExe = Join-Path $installDir "NovatechCut.exe"
+          if (!(Test-Path $installedExe)) { throw "Installed EXE not found" }
+          $p2 = Start-Process -FilePath $installedExe -ArgumentList "--self-test" -Wait -PassThru
+          if ($p2.ExitCode -ne 0) { throw "Installed EXE self-test failed: exit $($p2.ExitCode)" }
+
+      - name: Create source ZIP
+        shell: pwsh
+        run: |
+          Remove-Item novatech_cut/app.py.part* -Force
+          $items = @("novatech_cut","build","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
+          Compress-Archive $items dist/Novatech_Cut_v0.1.0_SOURCE.zip -Force
+
+      - name: Write SHA256 checksums
+        shell: pwsh
+        run: |
+          @(
+            "NovatechCut.exe",
+            "Novatech_Cut_Portable_Windows_x64.zip",
+            "Novatech_Cut_Setup_0.1.0_x64.exe",
+            "Novatech_Cut_v0.1.0_SOURCE.zip"
+          ) | ForEach-Object {
+            $h = Get-FileHash ("dist/" + $_) -Algorithm SHA256
+            "$($h.Hash.ToLower())  $_"
+          } | Set-Content dist/SHA256SUMS-WINDOWS.txt
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Novatech-Cut-Windows-v0.1.0
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/Novatech_Cut_Setup_0.1.0_x64.exe
+            dist/Novatech_Cut_Portable_Windows_x64.zip
+            dist/Novatech_Cut_v0.1.0_SOURCE.zip
+            dist/SHA256SUMS-WINDOWS.txt
