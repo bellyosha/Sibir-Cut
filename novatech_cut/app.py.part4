@@ -1,0 +1,22 @@
+            r=ttk.Frame(frm);r.pack(fill='x');ttk.Label(r,text=lab,width=18).pack(side='left');ttk.Entry(r,textvariable=var).pack(side='left',fill='x',expand=True)
+        ok=tk.BooleanVar(False);ttk.Checkbutton(frm,text='Я проверил воздушный тест и понимаю риск повреждения стола',variable=ok).pack(anchor='w',pady=8)
+        def apply():
+            if not ok.get():messagebox.showwarning('Калибровка','Подтвердите проверку воздушного теста.',parent=w);return
+            p=self.project.printer;p.tool_offset_x=vx.get();p.tool_offset_y=vy.get();p.work_z=vw.get();p.safe_z=vs.get();p.calibrated=True;self.project.material.work_z=p.work_z;self.project.material.safe_z=p.safe_z;w.destroy();self.refresh_all()
+        ttk.Button(frm,text='Сохранить калибровку',command=apply).pack(fill='x')
+    def export(self,air=False):
+        try:
+            self.sync_material();paths=prepare_paths(self.project.objects,self.project.material)
+            if not paths:raise GCodeError('Нет траекторий для экспорта')
+            g,stats=generate_gcode(paths,self.project.printer,self.project.material,air_test=air)
+            ext='.airtest.gcode' if air else '.gcode.3mf';f=filedialog.asksaveasfilename(defaultextension=ext,filetypes=[('Bambu G-code 3MF','*.gcode.3mf'),('G-code','*.gcode')])
+            if not f:return
+            if f.lower().endswith('.3mf'):build_gcode_3mf(f,g,stats,self.project.printer.name)
+            else:Path(f).write_text(g,encoding='utf-8')
+            report=Path(f+'.report.json');report.write_text(json.dumps({'air_test':air,'material':self.project.material.to_dict(),'printer':self.project.printer.to_dict(),'cut_length_mm':stats.cut_length_mm,'travel_length_mm':stats.travel_length_mm,'estimated_seconds':stats.estimated_seconds,'bounds':stats.bounds,'passes':stats.passes},ensure_ascii=False,indent=2),encoding='utf-8')
+            messagebox.showinfo('Экспорт',f'Готово.\n{f}\n\nПеред первым физическим резом обязательно проверьте воздушный тест.')
+        except Exception as e:messagebox.showerror('Экспорт заблокирован',str(e))
+
+def main():
+    App().mainloop()
+if __name__=='__main__':main()
