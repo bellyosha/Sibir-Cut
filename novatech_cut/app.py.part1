@@ -9,7 +9,7 @@ from .gcode import generate_gcode, GCodeError
 from .pack3mf import build_gcode_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.2.0'
+APP_TITLE='Novatech Cut 0.2.1'
 
 class App(tk.Tk):
     def __init__(self):
@@ -131,3 +131,12 @@ class App(tk.Tk):
                 elapsed=time.monotonic()-started
                 if elapsed>45:
                     timed_out['value']=True;self._busy=False;self._busy_win=None
+                    try:bar.stop();w.destroy()
+                    except Exception:pass
+                    messagebox.showerror(title,'Обработка превысила 45 секунд и остановлена для интерфейса. Закройте приложение и пришлите проблемный файл — такая операция не должна длиться так долго.',parent=self)
+                    return
+                self.after(50,poll);return
+            self._busy=False;self._busy_win=None
+            try:bar.stop();w.destroy()
+            except Exception:pass
+            if error is not None:
