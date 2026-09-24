@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: novatech-cut-windows-build
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
