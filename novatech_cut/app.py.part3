@@ -1,7 +1,7 @@
         w=tk.Toplevel(self);w.title('Профиль оборудования — Bambu Lab A1 + UMTS');w.geometry('760x760');w.transient(self);w.grab_set();p=self.project.printer
         outer=ttk.Frame(w,padding=10);outer.pack(fill='both',expand=True);canvas=tk.Canvas(outer,highlightthickness=0);sb=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview);inner=ttk.Frame(canvas);inner.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')));canvas.create_window((0,0),window=inner,anchor='nw');canvas.configure(yscrollcommand=sb.set);canvas.pack(side='left',fill='both',expand=True);sb.pack(side='right',fill='y')
         vals={}
-        fields=[('name','Название'),('bed_width','Ширина поля, мм'),('bed_height','Высота поля, мм'),('margin_left','Отступ слева'),('margin_right','Отступ справа'),('margin_bottom','Отступ снизу'),('margin_top','Отступ сверху'),('tool_offset_x','Смещение инструмента X'),('tool_offset_y','Смещение инструмента Y'),('work_z','Рабочая высота Z'),('safe_z','Безопасная высота Z'),('park_x','Парковка X'),('park_y','Парковка Y'),('max_work_speed','Макс. рабочая скорость'),('max_travel_speed','Макс. холостая скорость'),('max_accel','Макс. ускорение'),('min_z','Минимальный Z'),('max_z','Максимальный Z')]
+        fields=[('name','Название'),('bed_width','Ширина поля, мм'),('bed_height','Высота поля, мм'),('margin_left','Отступ слева'),('margin_right','Отступ справа'),('margin_bottom','Отступ снизу'),('margin_top','Отступ сверху'),('tool_offset_x','Смещение инструмента X'),('tool_offset_y','Смещение инструмента Y'),('work_z','Рабочая высота Z'),('safe_z','Безопасная высота Z'),('park_x','Парковка установки X'),('park_y','Парковка установки Y'),('max_work_speed','Макс. рабочая скорость'),('max_travel_speed','Макс. холостая скорость'),('max_accel','Макс. ускорение'),('min_z','Минимальный Z'),('max_z','Максимальный Z')]
         for key,lab in fields:
             r=ttk.Frame(inner);r.pack(fill='x',pady=2);ttk.Label(r,text=lab,width=29).pack(side='left');v=tk.StringVar(value=str(getattr(p,key)));ttk.Entry(r,textvariable=v).pack(side='left',fill='x',expand=True);vals[key]=v
         ttk.Label(inner,text='Стартовый G-code',style='Title.TLabel').pack(anchor='w',pady=(10,2));start=tk.Text(inner,height=12,wrap='none');start.pack(fill='x');start.insert('1.0',p.start_template)
@@ -39,12 +39,12 @@
 
     def _placement_ok(self):
         if not self.project.objects:return False,'Нет объектов'
-        raw=[]
-        for obj in self.project.objects:raw.extend(transformed_paths(obj))
-        if not raw:return False,'Нет геометрии'
-        x0,y0,x1,y1=bbox(raw);l,b,r,t=self.project.printer.safe_bounds
-        ok=x0>=l-1e-6 and y0>=b-1e-6 and x1<=r+1e-6 and y1<=t+1e-6
-        return ok,f'Объект: X {x0:.1f}…{x1:.1f} мм, Y {y0:.1f}…{y1:.1f} мм; безопасная зона X {l:.1f}…{r:.1f}, Y {b:.1f}…{t:.1f}'
+        paths=self.prepared_paths
+        if not paths:return False,'Нет готовой траектории'
+        info=analyze_path_bounds(paths,self.project.printer);x0,y0,x1,y1=info['tool_bounds'];l,b,r,t=self.project.printer.safe_bounds
+        ok=not info['outside_safe'] and not info['outside_physical']
+        prefix='Траектория инструмента'
+        return ok,f'{prefix}: X {x0:.1f}…{x1:.1f} мм, Y {y0:.1f}…{y1:.1f} мм; безопасная зона X {l:.1f}…{r:.1f}, Y {b:.1f}…{t:.1f}'
 
     def launch_wizard(self):
         old=getattr(self,'_wizard',None)
@@ -120,24 +120,24 @@
                 grid.columnconfigure(1,weight=1)
                 note('Для заполненных букв: «Рисование» → «Контур + заливка». Для вырезания тех же букв: «Резка».')
             elif i==3:
-                desc.config(text='Калибровка сообщает программе, где относительно сопла находится UMTS и на какой Z инструмент касается материала.')
+                desc.config(text='Калибровка сообщает программе, где относительно сопла находится UMTS и на какой Z инструмент касается материала. Homing теперь выполняется ВРУЧНУЮ до запуска файла, пока UMTS снят.')
                 p=self.project.printer
                 if p.calibrated:note(f'✓ Профиль откалиброван. Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}; рабочая Z={p.work_z:.2f}; безопасная Z={p.safe_z:.2f}.','ok')
                 else:note('Профиль ещё не откалиброван. Реальный экспорт заблокирован.','bad')
-                note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Безопасная Z — инструмент гарантированно не касается материала.\n• Рабочая Z — нож/ручка касается материала с нужным прижимом.\n\nUMTS должен быть СНЯТ во время homing. Значения Z нельзя угадывать: их определяют на конкретном модуле маленькими шагами.')
+                note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Безопасная Z — инструмент гарантированно не касается материала.\n• Рабочая Z — нож/ручка касается материала с нужным прижимом.\n\nПеред КАЖДЫМ запуском задания сначала выполните штатный Home на экране A1 при СНЯТОМ UMTS. Сам файл больше не вызывает G28, чтобы не запускать лишний сервисный цикл. Значения Z нельзя угадывать.')
                 ttk.Button(body,text='Открыть мастер калибровки',command=self.calibrate).pack(anchor='w',pady=8);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
             elif i==4:
                 desc.config(text='Сначала проверяем траекторию без касания материала. Это обязательный этап перед первым реальным запуском.')
                 if self._air_test_exported:note('✓ Воздушный тест для текущего задания сохранён.','ok')
                 else:note('Воздушный тест ещё не сохранён.','warn')
-                note('1. UMTS перед стартом файла должен быть снят.\n2. Запустите воздушный файл на A1.\n3. Принтер выполнит homing и встанет в парковку.\n4. На паузе установите UMTS и продолжите.\n5. Убедитесь, что инструмент нигде не касается стола и вся траектория остаётся в нужной зоне.')
+                note('1. UMTS снят.\n2. На экране A1 ВРУЧНУЮ выполните Home.\n3. После завершения Home запустите воздушный файл.\n4. Файл сразу отключит нагрев сопла/стола и переместит головку к переднему краю стола (по умолчанию X128 Y10).\n5. На паузе установите UMTS и продолжите.\n6. Убедитесь, что инструмент нигде не касается стола и вся траектория остаётся в нужной зоне.')
                 def air():
                     if self.export(air=True,show_message=False):messagebox.showinfo('Воздушный тест','Файл сохранён. Перенесите его на принтер и проверьте движение без касания материала.',parent=w);render()
                 ttk.Button(body,text='Сохранить файл воздушного теста…',command=air).pack(anchor='w',pady=8)
             else:
                 desc.config(text='После успешного воздушного теста можно сформировать рабочий файл и запустить его на A1.')
                 note('В этой версии Novatech Cut готовит проверенный .gcode.3mf, но не отправляет его на принтер по сети автоматически.')
-                note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.3mf.\n2. Перенесите файл на microSD/локальный носитель, с которого A1 показывает задания.\n3. ПЕРЕД стартом снимите UMTS.\n4. Запустите файл: сначала выполняется homing без UMTS, затем головка паркуется.\n5. На первой паузе установите UMTS и продолжите.\n6. Выполнится резка/рисование без нагрева и экструзии.\n7. В конце головка поднимется и припаркуется; на второй паузе снимите UMTS, затем завершите задание.','warn')
+                note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.3mf.\n2. Перенесите файл на носитель/в принтер.\n3. UMTS СНЯТ. На экране A1 вручную выполните Home.\n4. Только после завершения Home запустите файл.\n5. Файл принудительно задаёт M104 S0 / M140 S0, затем головка идёт к переднему краю X128 Y10.\n6. На первой паузе установите UMTS и продолжите.\n7. Выполнится резка/рисование без нагрева и экструзии.\n8. В конце головка снова идёт к переднему краю; на второй паузе снимите UMTS.','warn')
                 def final_export():
                     if not self._air_test_exported:
                         if not messagebox.askyesno('Воздушный тест','Для текущего задания не отмечен сохранённый воздушный тест. Всё равно перейти к экспорту?',parent=w):return
@@ -158,3 +158,8 @@
                 if i==4 and not self._air_test_exported:messagebox.showwarning('Воздушный тест','Сначала сохраните и проверьте воздушный тест.',parent=w);return
                 if i==len(titles)-1:w.destroy();return
             step['i']=max(0,min(len(titles)-1,i+delta));render()
+        back.config(command=lambda:go(-1));nextb.config(command=lambda:go(1))
+        def closed():self._wizard=None;w.destroy()
+        w.protocol('WM_DELETE_WINDOW',closed);render()
+
+    def calibrate(self):
