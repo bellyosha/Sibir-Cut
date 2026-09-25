@@ -18,6 +18,8 @@ class PrinterProfile:
     tool_offset_y: float = 0.0
     work_z: float = 0.0
     safe_z: float = 5.0
+    # Z calibration v2: work_z means FIRST CONTACT, not drawing pressure.
+    z_calibration_version: int = 2
     # Accessible front-edge parking point used for installing/removing UMTS.
     park_x: float = 128.0
     park_y: float = 10.0
@@ -69,7 +71,13 @@ class PrinterProfile:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]):
         data=dict(d or {})
+        had_z_v2=('z_calibration_version' in data and int(data.get('z_calibration_version') or 0)>=2)
         obj=cls(**data)
+        if not had_z_v2:
+            # Previous builds stored work_z as an arbitrary pressed working Z.
+            # Drawing now derives pressure from a separately calibrated first-contact Z.
+            obj.calibrated=False
+            obj.z_calibration_version=2
 
         # Migrate the old Novatech Cut default profile. Older builds parked at
         # X20/Y240 and executed G28 inside the print job. On A1 this is a poor
@@ -119,13 +127,19 @@ class MaterialProfile:
     fill_angle: float = 45.0
     fill_crosshatch: bool = False
     fill_inset: float = 0.2
+    # Drawing Z is derived from calibrated first-contact Z:
+    # work = contact - press_depth, safe = contact + lift_height.
+    drawing_press_depth: float = 0.10
+    drawing_lift_height: float = 5.0
 
     def to_dict(self):
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d):
-        return cls(**d)
+        data=dict(d or {})
+        allowed=set(cls.__dataclass_fields__.keys())
+        return cls(**{k:v for k,v in data.items() if k in allowed})
 
 
 DEFAULT_MATERIALS = [
@@ -135,8 +149,8 @@ DEFAULT_MATERIALS = [
     MaterialProfile("Винил с прорезанием подложки", passes=2, work_speed=20, blade_offset=0.25, overcut=0.60),
     MaterialProfile("Тонкий картон", passes=2, work_speed=18, blade_offset=0.30, overcut=0.65),
     MaterialProfile("Трафаретная пленка", passes=1, work_speed=25, blade_offset=0.25, overcut=0.45),
-    MaterialProfile("Рисование ручкой", mode="Рисование", passes=1, work_speed=40, blade_offset=0.0, overcut=0.0, corner_extra=False, drawing_style="Контур + заливка", fill_spacing=0.8, fill_angle=45.0, fill_crosshatch=False, fill_inset=0.15),
-    MaterialProfile("Рисование маркером", mode="Рисование", passes=1, work_speed=30, blade_offset=0.0, overcut=0.0, corner_extra=False, drawing_style="Контур + заливка", fill_spacing=1.8, fill_angle=45.0, fill_crosshatch=True, fill_inset=0.25),
+    MaterialProfile("Рисование ручкой", mode="Рисование", passes=1, work_speed=40, blade_offset=0.0, overcut=0.0, corner_extra=False, drawing_style="Контур + заливка", fill_spacing=0.8, fill_angle=45.0, fill_crosshatch=False, fill_inset=0.15, drawing_press_depth=0.10, drawing_lift_height=5.0),
+    MaterialProfile("Рисование маркером", mode="Рисование", passes=1, work_speed=30, blade_offset=0.0, overcut=0.0, corner_extra=False, drawing_style="Контур + заливка", fill_spacing=1.8, fill_angle=45.0, fill_crosshatch=True, fill_inset=0.25, drawing_press_depth=0.05, drawing_lift_height=5.0),
 ]
 
 
