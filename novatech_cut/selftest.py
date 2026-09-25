@@ -5,7 +5,7 @@ import traceback
 from pathlib import Path
 
 from .geometry import path_length, load_raster, _morphological_skeleton, hatch_fill_paths
-from .gcode import generate_gcode, validate_gcode
+from .gcode import generate_gcode, validate_gcode, analyze_path_bounds, GCodeError
 from .models import Project, SceneObject
 from .pack3mf import build_gcode_3mf, inspect_gcode_3mf, build_orca_preview_3mf, inspect_orca_preview_3mf
 from .pipeline import prepare_paths, import_paths, detect_import_kind
@@ -141,6 +141,26 @@ def _drawing_fill_regression_test() -> None:
     if len(prepared)<=2:
         raise RuntimeError('Drawing pipeline did not add fill paths')
 
+def _bounds_regression_test() -> None:
+    project=Project();project.printer.calibrated=True
+    good=[[(10.0,10.0),(40.0,10.0),(40.0,40.0)]]
+    info=analyze_path_bounds(good,project.printer)
+    if info['outside_safe'] or info['outside_physical']:
+        raise RuntimeError('Valid toolpath was incorrectly marked outside the bed')
+
+    # Offset must participate in safety checking.
+    project.printer.tool_offset_x=20.0
+    near_edge=[[(240.0,20.0),(250.0,20.0)]]
+    info=analyze_path_bounds(near_edge,project.printer)
+    if not info['outside_physical']:
+        raise RuntimeError('Tool offset overrun was not detected')
+    try:
+        generate_gcode(near_edge,project.printer,project.material,air_test=True)
+    except GCodeError:
+        pass
+    else:
+        raise RuntimeError('Export did not block a toolpath outside the physical bed')
+
 def run_self_test() -> None:
     project = Project()
     project.printer.calibrated = True
@@ -149,9 +169,19 @@ def run_self_test() -> None:
     gcode, stats = generate_gcode(paths, project.printer, project.material, air_test=True)
     validate_gcode(gcode, project.printer, require_pause=True)
     upper = gcode.upper()
-    for banned in ("M104", "M109", "M140", "M190", "G29", "M82", "M83"):
+    for banned in ("M109", "M190", "G29", "M82", "M83"):
         if banned in upper:
             raise RuntimeError(f"Self-test found forbidden command: {banned}")
+    if "G28" in upper:
+        raise RuntimeError("UMTS job must not contain automatic homing")
+    if "M104 S0" not in upper or "M140 S0" not in upper:
+        raise RuntimeError("UMTS job must explicitly disable nozzle and bed heaters")
+    if any(line.strip().startswith("G1 E") or " E" in line.split(";",1)[0] for line in upper.splitlines()):
+        raise RuntimeError("UMTS job must not extrude filament")
+    pause_pos=upper.find("M400 U1")
+    park_cmd=f"G1 X{project.printer.park_x:g} Y{project.printer.park_y:g}".upper()
+    if pause_pos<0 or park_cmd not in upper[:pause_pos]:
+        raise RuntimeError("Toolhead is not parked at the accessible edge before UMTS installation pause")
     if path_length(square) <= 0 or stats.cut_length_mm <= 0:
         raise RuntimeError("Self-test path statistics are invalid")
     with tempfile.TemporaryDirectory(prefix="novatech-cut-selftest-") as td:
@@ -168,6 +198,7 @@ def run_self_test() -> None:
         _transparent_png_thread_regression_test(td)
         _centerline_completeness_regression_test()
         _drawing_fill_regression_test()
+        _bounds_regression_test()
 
 def main() -> int:
     try:
