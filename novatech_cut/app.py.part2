@@ -1,8 +1,3 @@
-            if th is None:return
-            sm=simpledialog.askfloat('Векторизация','Сглаживание (0–5):',initialvalue=1.0,minvalue=0,maxvalue=5,parent=self)
-            if sm is None:return
-            inv=messagebox.askyesno('Векторизация','Инвертировать изображение?',parent=self)
-            center=messagebox.askyesno('Тип изображения','Это тонкий линейный рисунок, где нужна ОДНА линия по середине штриха?\n\nДа — построить осевые линии.\nНет — считать чёрное заполненной фигурой (правильно для резки и закрашивания).',parent=self,default='no')
             opts={'threshold':th,'external_only':False,'smoothing':sm,'invert':inv,'centerline':center}
 
         def imported(paths):
@@ -93,11 +88,12 @@
         if i>=len(self.project.objects):return
         x,y=self._canvas_to_bed(event.x,event.y);sx,sy=self._drag['start_pointer'];ox0,oy0=self._drag['start_xy'];o=self.project.objects[i]
         o.x=ox0+(x-sx);o.y=oy0+(y-sy)
-        x0,y0,x1,y1=self._object_bounds(o);l,b,r,t=self.project.printer.safe_bounds
-        if x0<l:o.x+=l-x0
-        if x1>r:o.x-=x1-r
-        if y0<b:o.y+=b-y0
-        if y1>t:o.y-=y1-t
+        x0,y0,x1,y1=self._object_bounds(o);p=self.project.printer;l,b,r,t=p.safe_bounds
+        tx0=x0+p.tool_offset_x;ty0=y0+p.tool_offset_y;tx1=x1+p.tool_offset_x;ty1=y1+p.tool_offset_y
+        if tx0<l:o.x+=l-tx0
+        if tx1>r:o.x-=tx1-r
+        if ty0<b:o.y+=b-ty0
+        if ty1>t:o.y-=ty1-t
         self.vars['x'].set(round(o.x,3));self.vars['y'].set(round(o.y,3));self.draw()
     def on_canvas_release(self,event):
         if not self._drag:return
@@ -145,9 +141,18 @@
         try:
             if self.prepare_error:
                 self.status.config(text=self.prepare_error);self.warn.config(text='');return
-            paths=self.prepared_paths;b=bbox(paths);length=sum(path_length(p) for p in paths);m=self.project.material
-            est=length/max(0.1,m.work_speed)*max(1,m.passes);kind='рисования' if m.mode=='Рисование' else 'реза';self.status.config(text=f'Траекторий: {len(paths)}   Длина {kind}: {length:.1f} мм   ≈ {est:.0f} с   Границы: {b[0]:.1f},{b[1]:.1f} — {b[2]:.1f},{b[3]:.1f} мм')
-            l,bb,r,t=self.project.printer.safe_bounds;bad=bool(paths) and (b[0]<l or b[1]<bb or b[2]>r or b[3]>t);self.warn.config(text='⚠ Выход за безопасную область' if bad else '')
+            paths=self.prepared_paths
+            if not paths:
+                self.status.config(text='Нет траекторий');self.warn.config(text='');return
+            info=analyze_path_bounds(paths,self.project.printer);b=info['tool_bounds'];length=sum(path_length(p) for p in paths);m=self.project.material
+            est=length/max(0.1,m.work_speed)*max(1,m.passes);kind='рисования' if m.mode=='Рисование' else 'реза'
+            self.status.config(text=f'Траекторий: {len(paths)}   Длина {kind}: {length:.1f} мм   ≈ {est:.0f} с   Инструмент: X {b[0]:.1f}…{b[2]:.1f}, Y {b[1]:.1f}…{b[3]:.1f} мм')
+            if info['outside_physical']:
+                self.warn.config(text='⛔ Траектория выходит ЗА ФИЗИЧЕСКИЕ ГРАНИЦЫ СТОЛА',foreground='#b91c1c')
+            elif info['outside_safe']:
+                self.warn.config(text='⚠ Траектория выходит за безопасную область',foreground='#b45309')
+            else:
+                self.warn.config(text='',foreground='#b45309')
         except Exception as e:self.status.config(text=str(e));self.warn.config(text='')
     def save_project(self):
         self.sync_material();f=self.current_file or filedialog.asksaveasfilename(defaultextension='.ncut',filetypes=[('Novatech Cut project','*.ncut')]);
