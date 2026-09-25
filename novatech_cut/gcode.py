@@ -67,15 +67,32 @@ def generate_gcode(paths: List[Path], printer: PrinterProfile, material: Materia
     bound_info=analyze_path_bounds(paths,printer)
     if bound_info['outside_physical'] or bound_info['outside_safe']:
         raise GCodeError(_bounds_error_message(bound_info,printer))
-    work_z = material.work_z if material.work_z != 0 else printer.work_z
-    safe_z = max(material.safe_z, printer.safe_z)
-    if air_test: work_z = max(work_z, safe_z) + max(1.0, material.air_test_delta_z)
+    if material.mode=='Рисование':
+        contact_z=float(printer.work_z)
+        press=float(getattr(material,'drawing_press_depth',0.10))
+        lift=float(getattr(material,'drawing_lift_height',5.0))
+        if not (0.0 <= press <= 0.5):
+            raise GCodeError(f"Прижим ручки {press:.3f} мм вне безопасного диапазона 0…0.5 мм.")
+        if lift < 3.0:
+            raise GCodeError(f"Подъём ручки {lift:.3f} мм слишком мал. Для рисования требуется минимум 3 мм.")
+        work_z=contact_z-press
+        safe_z=max(float(printer.safe_z),float(material.safe_z),contact_z+lift)
+    else:
+        work_z = material.work_z if material.work_z != 0 else printer.work_z
+        safe_z = max(material.safe_z, printer.safe_z)
+    if work_z < printer.min_z-1e-6 or safe_z > printer.max_z+1e-6:
+        raise GCodeError(f"Расчёт Z вне диапазона принтера: рабочая Z={work_z:.3f}, безопасная Z={safe_z:.3f}.")
+    if air_test: work_z = min(printer.max_z, safe_z + max(1.0, material.air_test_delta_z))
     work_speed=min(material.work_speed,printer.max_work_speed)*60
     travel_speed=min(material.travel_speed,printer.max_travel_speed)*60
     lines=[]
     lines.extend(printer.start_template.format(safe_z=safe_z,park_x=printer.park_x,park_y=printer.park_y).splitlines())
     lines.append(f"; MODE: {'AIR TEST' if air_test else material.mode}")
     lines.append(f"; MATERIAL: {material.name}")
+    if material.mode=='Рисование':
+        lines.append(f"; PEN CONTACT Z: {_fmt(printer.work_z)}")
+        lines.append(f"; PEN PRESS DEPTH: {_fmt(getattr(material,'drawing_press_depth',0.10))} mm")
+        lines.append(f"; PEN LIFT HEIGHT: {_fmt(getattr(material,'drawing_lift_height',5.0))} mm")
     cut_len=0; travel_len=0; cur=(printer.park_x,printer.park_y)
     for pass_no in range(material.passes):
         lines.append(f"; PASS {pass_no+1}/{material.passes}")
@@ -83,14 +100,20 @@ def generate_gcode(paths: List[Path], printer: PrinterProfile, material: Materia
             if len(path)<2:continue
             x0=path[0][0]+printer.tool_offset_x; y0=path[0][1]+printer.tool_offset_y
             lines.append(f"G1 Z{_fmt(safe_z)} F600 ; tool up")
+            if material.mode=='Рисование':
+                lines.append("M400 ; wait until pen is fully lifted before XY travel")
             lines.append(f"G1 X{_fmt(x0)} Y{_fmt(y0)} F{_fmt(travel_speed)} ; travel path {pi}")
             travel_len+=math.hypot(x0-cur[0],y0-cur[1]);cur=(x0,y0)
             lines.append(f"G1 Z{_fmt(work_z)} F300 ; tool down")
+            if material.mode=='Рисование':
+                lines.append("M400 ; wait until pen reaches drawing Z")
             for x,y in path[1:]:
                 x+=printer.tool_offset_x;y+=printer.tool_offset_y
                 lines.append(f"G1 X{_fmt(x)} Y{_fmt(y)} F{_fmt(work_speed)}")
                 cut_len+=math.hypot(x-cur[0],y-cur[1]);cur=(x,y)
             lines.append(f"G1 Z{_fmt(safe_z)} F600 ; tool up")
+            if material.mode=='Рисование':
+                lines.append("M400 ; pen fully clear before next move")
     lines.extend(printer.end_template.format(safe_z=safe_z,park_x=printer.park_x,park_y=printer.park_y).splitlines())
     gcode='\n'.join(lines)+'\n'
     validate_gcode(gcode, printer, require_pause=True)
