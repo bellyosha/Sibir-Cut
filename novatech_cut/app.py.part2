@@ -51,10 +51,10 @@
         self.apply_job_settings()
     def sync_material(self):
         m=self.project.material;m.mode=self.mode.get();m.passes=max(1,self.passes.get());m.work_speed=max(0.1,self.work_speed.get());m.travel_speed=max(0.1,self.travel_speed.get());m.work_z=self.work_z.get();m.safe_z=self.safe_z.get();m.blade_offset=max(0,self.blade_offset.get());m.overcut=max(0,self.overcut.get())
-        m.drawing_style=self.drawing_style.get() or 'Контур + заливка';m.fill_spacing=max(0.1,self.fill_spacing.get());m.fill_angle=self.fill_angle.get();m.fill_crosshatch=bool(self.fill_crosshatch.get());m.fill_inset=max(0.0,self.fill_inset.get())
+        m.drawing_style=self.drawing_style.get() or 'Контур + заливка';m.fill_spacing=max(0.1,self.fill_spacing.get());m.fill_angle=self.fill_angle.get();m.fill_crosshatch=bool(self.fill_crosshatch.get());m.fill_inset=max(0.0,self.fill_inset.get());m.drawing_press_depth=max(0.0,self.pen_press.get());m.drawing_lift_height=max(0.0,self.pen_lift.get())
     def refresh_fields(self):
         m=self.project.material;self.material_var.set(m.name);self.mode.set(m.mode);self.passes.set(m.passes);self.work_speed.set(m.work_speed);self.travel_speed.set(m.travel_speed);self.work_z.set(m.work_z);self.safe_z.set(m.safe_z);self.blade_offset.set(m.blade_offset);self.overcut.set(m.overcut)
-        self.drawing_style.set(getattr(m,'drawing_style','Контур + заливка'));self.fill_spacing.set(getattr(m,'fill_spacing',1.0));self.fill_angle.set(getattr(m,'fill_angle',45.0));self.fill_crosshatch.set(bool(getattr(m,'fill_crosshatch',False)));self.fill_inset.set(getattr(m,'fill_inset',0.2))
+        self.drawing_style.set(getattr(m,'drawing_style','Контур + заливка'));self.fill_spacing.set(getattr(m,'fill_spacing',1.0));self.fill_angle.set(getattr(m,'fill_angle',45.0));self.fill_crosshatch.set(bool(getattr(m,'fill_crosshatch',False)));self.fill_inset.set(getattr(m,'fill_inset',0.2));self.pen_press.set(getattr(m,'drawing_press_depth',0.10));self.pen_lift.set(getattr(m,'drawing_lift_height',5.0))
         self.calib_label.config(text='Профиль A1: ОТКАЛИБРОВАН' if self.project.printer.calibrated else 'Профиль A1: НЕ ОТКАЛИБРОВАН — экспорт заблокирован',foreground='#15803d' if self.project.printer.calibrated else '#b91c1c')
     def _rebuild_prepared(self):
         try:
