@@ -9,7 +9,7 @@ from .gcode import generate_gcode, GCodeError, analyze_path_bounds
 from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.2.6'
+APP_TITLE='Novatech Cut 0.2.7'
 
 class App(tk.Tk):
     def __init__(self):
@@ -44,17 +44,17 @@ class App(tk.Tk):
         ttk.Label(right,text='Параметры задания',style='Title.TLabel').pack(anchor='w')
         self.material_var=tk.StringVar(value=self.project.material.name);cb=ttk.Combobox(right,textvariable=self.material_var,values=[m.name for m in DEFAULT_MATERIALS],state='readonly');cb.pack(fill='x',pady=5);cb.bind('<<ComboboxSelected>>',lambda e:self.select_material())
         self.mode=tk.StringVar();self.passes=tk.IntVar();self.work_speed=tk.DoubleVar();self.travel_speed=tk.DoubleVar();self.work_z=tk.DoubleVar();self.safe_z=tk.DoubleVar();self.blade_offset=tk.DoubleVar();self.overcut=tk.DoubleVar()
-        self.drawing_style=tk.StringVar();self.fill_spacing=tk.DoubleVar();self.fill_angle=tk.DoubleVar();self.fill_crosshatch=tk.BooleanVar();self.fill_inset=tk.DoubleVar()
+        self.drawing_style=tk.StringVar();self.fill_spacing=tk.DoubleVar();self.fill_angle=tk.DoubleVar();self.fill_crosshatch=tk.BooleanVar();self.fill_inset=tk.DoubleVar();self.pen_press=tk.DoubleVar();self.pen_lift=tk.DoubleVar()
         r=ttk.Frame(right);r.pack(fill='x',pady=2);ttk.Label(r,text='Режим').pack(anchor='w');mode_cb=ttk.Combobox(r,textvariable=self.mode,values=['Резка','Рисование'],state='readonly');mode_cb.pack(fill='x');mode_cb.bind('<<ComboboxSelected>>',lambda e:self.on_mode_changed())
         for label,var in [('Проходов',self.passes),('Рабочая скорость, мм/с',self.work_speed),('Холостой ход, мм/с',self.travel_speed),('Рабочая высота Z',self.work_z),('Безопасная высота Z',self.safe_z),('Blade offset, мм',self.blade_offset),('Overcut, мм',self.overcut)]:
             r=ttk.Frame(right);r.pack(fill='x',pady=2);ttk.Label(r,text=label).pack(anchor='w');ttk.Entry(r,textvariable=var).pack(fill='x')
         draw_box=ttk.LabelFrame(right,text='Рисование / заливка',padding=6);draw_box.pack(fill='x',pady=6)
         ttk.Label(draw_box,text='Что рисовать').pack(anchor='w');ttk.Combobox(draw_box,textvariable=self.drawing_style,values=['Контур + заливка','Только заливка','Только контур'],state='readonly').pack(fill='x')
-        for label,var in [('Шаг заливки, мм',self.fill_spacing),('Угол заливки, °',self.fill_angle),('Отступ заливки от края, мм',self.fill_inset)]:
+        for label,var in [('Шаг заливки, мм',self.fill_spacing),('Угол заливки, °',self.fill_angle),('Отступ заливки от края, мм',self.fill_inset),('Прижим ручки ниже Z касания, мм',self.pen_press),('Подъём ручки над Z касания, мм',self.pen_lift)]:
             rr=ttk.Frame(draw_box);rr.pack(fill='x',pady=2);ttk.Label(rr,text=label).pack(anchor='w');ttk.Entry(rr,textvariable=var).pack(fill='x')
         ttk.Checkbutton(draw_box,text='Перекрёстная заливка (второй проход +90°)',variable=self.fill_crosshatch).pack(anchor='w',pady=3);ttk.Button(draw_box,text='Применить и обновить предпросмотр',command=self.apply_job_settings).pack(fill='x',pady=(4,0))
         ttk.Label(right,text='Подсказка: объект можно перетаскивать мышкой прямо по полю A1.',foreground='#475569',wraplength=300).pack(fill='x',pady=(4,2))
-        ttk.Label(right,text='⚠ Z задаёт глубину/прижим механического инструмента.\nНеверное значение может повредить стол.',foreground='#b45309',wraplength=300).pack(fill='x',pady=8)
+        ttk.Label(right,text='⚠ Для рисования Z калибровки — это ПЕРВОЕ касание без нажима. Прижим ручки задаётся отдельно и ограничен 0…0,5 мм.',foreground='#b45309',wraplength=300).pack(fill='x',pady=8)
         self.calib_label=ttk.Label(right,text='');self.calib_label.pack(fill='x',pady=5)
         ttk.Button(right,text='Мастер подготовки и запуска',style='Danger.TButton',command=self.launch_wizard).pack(fill='x',pady=6)
         ttk.Button(right,text='Воздушный тест (быстрый экспорт)',command=lambda:self.export(air=True)).pack(fill='x',pady=3)
