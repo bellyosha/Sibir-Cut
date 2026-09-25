@@ -1,8 +1,3 @@
-        back.config(command=lambda:go(-1));nextb.config(command=lambda:go(1))
-        def closed():self._wizard=None;w.destroy()
-        w.protocol('WM_DELETE_WINDOW',closed);render()
-
-    def calibrate(self):
         w=tk.Toplevel(self);w.title('Мастер калибровки A1 + UMTS')
         screen_h=max(560,self.winfo_screenheight());screen_w=max(760,self.winfo_screenwidth())
         width=min(800,max(640,int(screen_w*0.68)));height=min(620,max(480,int(screen_h*0.72)))
@@ -66,7 +61,7 @@
 5. Измерьте смещение X/Y кончика ножа или ручки относительно сопла.
 6. Найдите безопасную Z — инструмент гарантированно не касается материала.
 7. Найдите рабочую Z маленькими шагами на ненужном материале.
-8. Введите значения ниже, поставьте галочку и нажмите «Сохранить калибровку» ВВЕРХУ окна.
+8. Введите значения ниже, поставьте галочку и нажмите «Сохранить калибровку» ВВЕРХУ окна. Перед каждым заданием повторяйте только ручной Home с UMTS снятым.
 
 Offset X/Y — реальное смещение инструмента от сопла.
 Рабочая Z — высота контакта инструмента с материалом.
@@ -85,6 +80,15 @@ Esc — отмена
         try:
             self.sync_material();paths=prepare_paths(self.project.objects,self.project.material)
             if not paths:raise GCodeError('Нет траекторий для экспорта')
+            info=analyze_path_bounds(paths,self.project.printer)
+            if info['outside_physical'] or info['outside_safe']:
+                x0,y0,x1,y1=info['tool_bounds'];l,b,r,t=self.project.printer.safe_bounds
+                messagebox.showwarning(
+                    'Траектория выходит за границы',
+                    f'Экспорт остановлен.\n\nФактическая траектория инструмента с учётом Offset X/Y:\nX {x0:.2f}…{x1:.2f} мм\nY {y0:.2f}…{y1:.2f} мм\n\nБезопасная область:\nX {l:.2f}…{r:.2f} мм\nY {b:.2f}…{t:.2f} мм\n\nПереместите или уменьшите объект.',
+                    parent=self
+                )
+                return None
             g,stats=generate_gcode(paths,self.project.printer,self.project.material,air_test=air)
             ext='.airtest.gcode.3mf' if air else '.gcode.3mf';f=filedialog.asksaveasfilename(defaultextension=ext,filetypes=[('Bambu G-code 3MF','*.gcode.3mf'),('G-code','*.gcode')])
             if not f:return None
