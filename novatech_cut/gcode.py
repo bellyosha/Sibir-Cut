@@ -18,9 +18,55 @@ class GCodeError(ValueError): pass
 
 def _fmt(v): return f"{v:.3f}".rstrip('0').rstrip('.')
 
+def analyze_path_bounds(paths: List[Path], printer: PrinterProfile):
+    """Return geometric/tool-tip bounds and whether they stay inside the bed."""
+    if not paths:
+        return {
+            'geometry_bounds': (0.0,0.0,0.0,0.0),
+            'tool_bounds': (0.0,0.0,0.0,0.0),
+            'outside_safe': False,
+            'outside_physical': False,
+        }
+    gb=bbox(paths)
+    tb=(
+        gb[0]+printer.tool_offset_x,
+        gb[1]+printer.tool_offset_y,
+        gb[2]+printer.tool_offset_x,
+        gb[3]+printer.tool_offset_y,
+    )
+    l,b,r,t=printer.safe_bounds
+    outside_safe=tb[0]<l-1e-6 or tb[1]<b-1e-6 or tb[2]>r+1e-6 or tb[3]>t+1e-6
+    outside_physical=tb[0]<-1e-6 or tb[1]<-1e-6 or tb[2]>printer.bed_width+1e-6 or tb[3]>printer.bed_height+1e-6
+    return {
+        'geometry_bounds': gb,
+        'tool_bounds': tb,
+        'outside_safe': outside_safe,
+        'outside_physical': outside_physical,
+    }
+
+def _bounds_error_message(info, printer):
+    x0,y0,x1,y1=info['tool_bounds']
+    l,b,r,t=printer.safe_bounds
+    if info['outside_physical']:
+        return (
+            "Траектория инструмента выходит за физические границы стола. "
+            f"С учётом Offset X/Y: X {x0:.2f}…{x1:.2f}, Y {y0:.2f}…{y1:.2f} мм; "
+            f"стол: X 0…{printer.bed_width:.2f}, Y 0…{printer.bed_height:.2f} мм."
+        )
+    if info['outside_safe']:
+        return (
+            "Траектория инструмента выходит за настроенную безопасную область. "
+            f"С учётом Offset X/Y: X {x0:.2f}…{x1:.2f}, Y {y0:.2f}…{y1:.2f} мм; "
+            f"безопасная зона: X {l:.2f}…{r:.2f}, Y {b:.2f}…{t:.2f} мм."
+        )
+    return ""
+
 def generate_gcode(paths: List[Path], printer: PrinterProfile, material: MaterialProfile, air_test=False):
     if not printer.calibrated:
         raise GCodeError("Профиль принтера не откалиброван. Экспорт заблокирован.")
+    bound_info=analyze_path_bounds(paths,printer)
+    if bound_info['outside_physical'] or bound_info['outside_safe']:
+        raise GCodeError(_bounds_error_message(bound_info,printer))
     work_z = material.work_z if material.work_z != 0 else printer.work_z
     safe_z = max(material.safe_z, printer.safe_z)
     if air_test: work_z = max(work_z, safe_z) + max(1.0, material.air_test_delta_z)
@@ -49,12 +95,12 @@ def generate_gcode(paths: List[Path], printer: PrinterProfile, material: Materia
     gcode='\n'.join(lines)+'\n'
     validate_gcode(gcode, printer, require_pause=True)
     est=(cut_len/max(0.1,work_speed/60))+(travel_len/max(0.1,travel_speed/60))+len(paths)*material.passes*0.6+4
-    b=bbox(paths)
+    b=bound_info['tool_bounds']
     return gcode, JobStats(cut_len,travel_len,est,b,len(paths),material.passes)
 
 def validate_gcode(gcode: str, printer: PrinterProfile, require_pause=True):
     errors=[]; absolute=True; pos={'X':0.0,'Y':0.0,'Z':0.0}; module_installed=False; pause_count=0
-    allowed={'G0','G1','G28','G90','G91','G4','M400'}
+    allowed={'G0','G1','G28','G90','G91','G4','M400','M104','M140'}
     xmin,ymin,xmax,ymax=printer.safe_bounds
     for n,raw in enumerate(gcode.splitlines(),1):
         code=raw.split(';',1)[0].strip()
@@ -69,8 +115,20 @@ def validate_gcode(gcode: str, printer: PrinterProfile, require_pause=True):
                 if pause_count==1: module_installed=True
                 elif pause_count>=2: module_installed=False
             continue
+        if cmd in ('M104','M140'):
+            sval=None
+            for p in parts[1:]:
+                if p[:1].upper()=='S':
+                    try:sval=float(p[1:])
+                    except ValueError:errors.append(f"Строка {n}: неверный параметр {p}")
+            if sval is None or abs(sval)>1e-9:
+                errors.append(f"Строка {n}: нагрев запрещён ({cmd} допускается только с S0)")
+            continue
         if cmd=='G28':
-            if module_installed: errors.append(f"Строка {n}: homing после установки UMTS запрещен")
+            if getattr(printer,'manual_home_required',False):
+                errors.append(f"Строка {n}: автоматический homing внутри UMTS-задания запрещён; выполните homing вручную до запуска файла")
+            elif module_installed:
+                errors.append(f"Строка {n}: homing после установки UMTS запрещен")
             continue
         if cmd in ('G0','G1'):
             vals={}
@@ -87,7 +145,7 @@ def validate_gcode(gcode: str, printer: PrinterProfile, require_pause=True):
                 if not (xmin-1e-6<=pos['X']<=xmax+1e-6 and ymin-1e-6<=pos['Y']<=ymax+1e-6):
                     errors.append(f"Строка {n}: X/Y вне безопасной области: X={pos['X']:.3f}, Y={pos['Y']:.3f}")
     upper=gcode.upper()
-    for banned in ('M104','M109','M140','M190','G29','M82','M83'):
+    for banned in ('M109','M190','G29','M82','M83'):
         if re.search(rf'(^|\n)\s*{banned}\b',upper):errors.append(f"Запрещенная команда {banned}")
     if require_pause and pause_count<2:errors.append("Нет обязательных пауз установки/снятия UMTS")
     if not re.search(r'G1\s+Z[-+\d.]',gcode,re.I):errors.append("Нет управляемого подъема Z")
