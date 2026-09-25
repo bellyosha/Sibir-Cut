@@ -161,6 +161,41 @@ def _bounds_regression_test() -> None:
     else:
         raise RuntimeError('Export did not block a toolpath outside the physical bed')
 
+def _drawing_z_safety_regression_test() -> None:
+    project=Project();project.printer.calibrated=True
+    project.printer.work_z=5.0   # first contact, no pressure
+    project.printer.safe_z=8.0
+    project.material.mode='Рисование'
+    project.material.name='Рисование ручкой'
+    project.material.drawing_press_depth=0.10
+    project.material.drawing_lift_height=5.0
+    paths=[[(20.0,20.0),(40.0,20.0)],[(20.0,30.0),(40.0,30.0)]]
+    gcode,_=generate_gcode(paths,project.printer,project.material,air_test=False)
+    upper=gcode.upper()
+    if 'G1 Z4.9' not in upper:
+        raise RuntimeError('Drawing Z is not derived from first-contact Z minus pen pressure')
+    if 'G1 Z10' not in upper:
+        raise RuntimeError('Pen safe Z is not derived from contact Z plus lift height')
+    lines=[line.split(';',1)[0].strip().upper() for line in gcode.splitlines()]
+    # Every drawing travel must have a completed Z lift before XY motion.
+    for i,line in enumerate(lines):
+        if 'TRAVEL PATH' in gcode.splitlines()[i].upper() if i < len(gcode.splitlines()) else False:
+            pass
+    raw=gcode.splitlines()
+    for i,line in enumerate(raw):
+        if '; travel path ' in line.lower():
+            prev=[x.split(';',1)[0].strip().upper() for x in raw[max(0,i-3):i]]
+            if not any(x=='M400' for x in prev):
+                raise RuntimeError('Drawing XY travel is not preceded by M400 after pen lift')
+    # Unsafe pressure must be blocked.
+    project.material.drawing_press_depth=0.8
+    try:
+        generate_gcode(paths,project.printer,project.material,air_test=False)
+    except GCodeError:
+        pass
+    else:
+        raise RuntimeError('Excessive drawing pressure was not blocked')
+
 def run_self_test() -> None:
     project = Project()
     project.printer.calibrated = True
@@ -213,6 +248,7 @@ def run_self_test() -> None:
         _centerline_completeness_regression_test()
         _drawing_fill_regression_test()
         _bounds_regression_test()
+        _drawing_z_safety_regression_test()
 
 def main() -> int:
     try:
