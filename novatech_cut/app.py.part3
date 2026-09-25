@@ -60,7 +60,7 @@
 
         m=self.project.material
         wm=tk.StringVar(value=m.mode);wmat=tk.StringVar(value=m.name);wstyle=tk.StringVar(value=getattr(m,'drawing_style','Контур + заливка'))
-        wspacing=tk.DoubleVar(value=getattr(m,'fill_spacing',1.0));wangle=tk.DoubleVar(value=getattr(m,'fill_angle',45.0));wcross=tk.BooleanVar(value=getattr(m,'fill_crosshatch',False));winset=tk.DoubleVar(value=getattr(m,'fill_inset',0.2))
+        wspacing=tk.DoubleVar(value=getattr(m,'fill_spacing',1.0));wangle=tk.DoubleVar(value=getattr(m,'fill_angle',45.0));wcross=tk.BooleanVar(value=getattr(m,'fill_crosshatch',False));winset=tk.DoubleVar(value=getattr(m,'fill_inset',0.2));wpress=tk.DoubleVar(value=getattr(m,'drawing_press_depth',0.10));wlift=tk.DoubleVar(value=getattr(m,'drawing_lift_height',5.0))
         wpasses=tk.IntVar(value=m.passes);wspeed=tk.DoubleVar(value=m.work_speed);wblade=tk.DoubleVar(value=m.blade_offset);wover=tk.DoubleVar(value=m.overcut)
 
         def clear():
@@ -71,12 +71,12 @@
         def load_material(event=None):
             prof=next((x for x in DEFAULT_MATERIALS if x.name==wmat.get()),None)
             if not prof:return
-            wm.set(prof.mode);wpasses.set(prof.passes);wspeed.set(prof.work_speed);wblade.set(prof.blade_offset);wover.set(prof.overcut);wstyle.set(getattr(prof,'drawing_style','Контур + заливка'));wspacing.set(getattr(prof,'fill_spacing',1.0));wangle.set(getattr(prof,'fill_angle',45.0));wcross.set(getattr(prof,'fill_crosshatch',False));winset.set(getattr(prof,'fill_inset',0.2))
+            wm.set(prof.mode);wpasses.set(prof.passes);wspeed.set(prof.work_speed);wblade.set(prof.blade_offset);wover.set(prof.overcut);wstyle.set(getattr(prof,'drawing_style','Контур + заливка'));wspacing.set(getattr(prof,'fill_spacing',1.0));wangle.set(getattr(prof,'fill_angle',45.0));wcross.set(getattr(prof,'fill_crosshatch',False));winset.set(getattr(prof,'fill_inset',0.2));wpress.set(getattr(prof,'drawing_press_depth',0.10));wlift.set(getattr(prof,'drawing_lift_height',5.0))
             if step['i']==2:render()
         def apply_settings():
             prof=next((x for x in DEFAULT_MATERIALS if x.name==wmat.get()),None)
             if prof:self.project.material=MaterialProfile.from_dict(prof.to_dict())
-            mm=self.project.material;mm.name=wmat.get();mm.mode=wm.get();mm.passes=max(1,wpasses.get());mm.work_speed=max(0.1,wspeed.get());mm.blade_offset=max(0,wblade.get());mm.overcut=max(0,wover.get());mm.drawing_style=wstyle.get();mm.fill_spacing=max(0.1,wspacing.get());mm.fill_angle=wangle.get();mm.fill_crosshatch=bool(wcross.get());mm.fill_inset=max(0,winset.get())
+            mm=self.project.material;mm.name=wmat.get();mm.mode=wm.get();mm.passes=max(1,wpasses.get());mm.work_speed=max(0.1,wspeed.get());mm.blade_offset=max(0,wblade.get());mm.overcut=max(0,wover.get());mm.drawing_style=wstyle.get();mm.fill_spacing=max(0.1,wspacing.get());mm.fill_angle=wangle.get();mm.fill_crosshatch=bool(wcross.get());mm.fill_inset=max(0,winset.get());mm.drawing_press_depth=max(0,wpress.get());mm.drawing_lift_height=max(0,wlift.get())
             self._air_test_exported=False;self.refresh_all()
         def center_selected():
             if not self.project.objects:return
@@ -117,14 +117,15 @@
                 ttk.Label(draw,text='Режим').grid(row=0,column=0,sticky='w');ttk.Combobox(draw,textvariable=wstyle,values=['Контур + заливка','Только заливка','Только контур'],state='readonly',width=24).grid(row=0,column=1,columnspan=3,sticky='ew',padx=8)
                 ttk.Label(draw,text='Шаг заливки, мм').grid(row=1,column=0,sticky='w');ttk.Entry(draw,textvariable=wspacing,width=10).grid(row=1,column=1,padx=8);ttk.Label(draw,text='Угол, °').grid(row=1,column=2,sticky='w');ttk.Entry(draw,textvariable=wangle,width=10).grid(row=1,column=3,padx=8)
                 ttk.Label(draw,text='Отступ от края, мм').grid(row=2,column=0,sticky='w');ttk.Entry(draw,textvariable=winset,width=10).grid(row=2,column=1,padx=8);ttk.Checkbutton(draw,text='Перекрёстная заливка',variable=wcross).grid(row=2,column=2,columnspan=2,sticky='w')
+                ttk.Label(draw,text='Прижим ручки, мм').grid(row=3,column=0,sticky='w');ttk.Entry(draw,textvariable=wpress,width=10).grid(row=3,column=1,padx=8);ttk.Label(draw,text='Подъём ручки, мм').grid(row=3,column=2,sticky='w');ttk.Entry(draw,textvariable=wlift,width=10).grid(row=3,column=3,padx=8)
                 grid.columnconfigure(1,weight=1)
-                note('Для заполненных букв: «Рисование» → «Контур + заливка». Для вырезания тех же букв: «Резка».')
+                note('Для заполненных букв: «Рисование» → «Контур + заливка». Z калибровки — первое касание без нажима. Начните с прижима 0,05–0,10 мм и подъёма 5 мм.')
             elif i==3:
                 desc.config(text='Калибровка сообщает программе, где относительно сопла находится UMTS и на какой Z инструмент касается материала. Homing теперь выполняется ВРУЧНУЮ до запуска файла, пока UMTS снят.')
                 p=self.project.printer
-                if p.calibrated:note(f'✓ Профиль откалиброван. Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}; рабочая Z={p.work_z:.2f}; безопасная Z={p.safe_z:.2f}.','ok')
+                if p.calibrated:note(f'✓ Профиль откалиброван. Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}; Z первого касания={p.work_z:.2f}; минимальная безопасная Z={p.safe_z:.2f}.','ok')
                 else:note('Профиль ещё не откалиброван. Реальный экспорт заблокирован.','bad')
-                note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Безопасная Z — инструмент гарантированно не касается материала.\n• Рабочая Z — нож/ручка касается материала с нужным прижимом.\n\nПеред КАЖДЫМ запуском задания сначала выполните штатный Home на экране A1 при СНЯТОМ UMTS. Сам файл больше не вызывает G28, чтобы не запускать лишний сервисный цикл. Значения Z нельзя угадывать.')
+                note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Z первого касания — ручка только начинает касаться материала, БЕЗ нажима.\n• Минимальная безопасная Z — инструмент гарантированно не касается материала.\n• Для рисования фактический прижим и подъём задаются отдельно в параметрах задания.\n\nПеред КАЖДЫМ запуском задания сначала выполните штатный Home на экране A1 при СНЯТОМ UMTS. Сам файл больше не вызывает G28, чтобы не запускать лишний сервисный цикл. Значения Z нельзя угадывать.')
                 ttk.Button(body,text='Открыть мастер калибровки',command=self.calibrate).pack(anchor='w',pady=8);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
             elif i==4:
                 desc.config(text='Сначала проверяем траекторию без касания материала. Это обязательный этап перед первым реальным запуском.')
@@ -162,4 +163,3 @@
         def closed():self._wizard=None;w.destroy()
         w.protocol('WM_DELETE_WINDOW',closed);render()
 
-    def calibrate(self):
