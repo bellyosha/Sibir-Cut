@@ -5,11 +5,11 @@ from pathlib import Path
 from .models import Project, SceneObject, DEFAULT_MATERIALS, MaterialProfile
 from .pipeline import import_paths, prepare_paths, detect_import_kind
 from .geometry import bbox, path_length, transformed_paths
-from .gcode import generate_gcode, GCodeError
+from .gcode import generate_gcode, GCodeError, analyze_path_bounds
 from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.2.5'
+APP_TITLE='Novatech Cut 0.2.6'
 
 class App(tk.Tk):
     def __init__(self):
@@ -158,3 +158,8 @@ class App(tk.Tk):
         opts={};is_raster=detected_kind=='raster'
         if is_raster:
             th=simpledialog.askinteger('Векторизация','Порог 0–255:',initialvalue=128,minvalue=0,maxvalue=255,parent=self)
+            if th is None:return
+            sm=simpledialog.askfloat('Векторизация','Сглаживание (0–5):',initialvalue=1.0,minvalue=0,maxvalue=5,parent=self)
+            if sm is None:return
+            inv=messagebox.askyesno('Векторизация','Инвертировать изображение?',parent=self)
+            center=messagebox.askyesno('Тип изображения','Это тонкий линейный рисунок, где нужна ОДНА линия по середине штриха?\n\nДа — построить осевые линии.\nНет — считать чёрное заполненной фигурой (правильно для резки и закрашивания).',parent=self,default='no')
