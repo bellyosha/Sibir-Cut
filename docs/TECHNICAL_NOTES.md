@@ -1,4 +1,4 @@
-# Технические заметки Novatech Cut 0.2.6
+# Технические заметки Novatech Cut 0.2.7
 
 Дата проверки: 24.09.2026.
 
@@ -13,7 +13,7 @@
 
 ## Bambu-specific decisions
 
-The verified pause command used by Bambu Studio profiles is `M400 U1`. Starting with 0.2.6 the UMTS job contains no automatic `G28`; the operator must home manually before launching the file with UMTS removed. The file explicitly sends `M104 S0` and `M140 S0`, parks at the accessible front edge, then pauses for installation. Non-zero heating, extrusion and ABL are rejected. A second pause is emitted after returning to the front-edge park so the user can remove UMTS.
+The verified pause command used by Bambu Studio profiles is `M400 U1`. Starting with 0.2.7 the UMTS job contains no automatic `G28`; the operator must home manually before launching the file with UMTS removed. The file explicitly sends `M104 S0` and `M140 S0`, parks at the accessible front edge, then pauses for installation. Non-zero heating, extrusion and ABL are rejected. A second pause is emitted after returning to the front-edge park so the user can remove UMTS.
 
 The `.gcode.3mf` writer creates the OPC/3MF container, `Metadata/plate_1.gcode`, uppercase MD5, plate metadata, slice metadata, project metadata and thumbnails. The archive is re-opened and checksum-validated by tests.
 
@@ -24,3 +24,8 @@ No physical Bambu Lab A1 is attached to the execution environment. Therefore har
 ## Windows build boundary
 
 The repository contains the Windows CI workflow that builds and self-tests the frozen executable and installer.
+
+
+## Drawing Z safety
+
+0.2.7 changes drawing Z semantics. PrinterProfile.work_z is treated as calibrated first-contact Z (no spring compression). MaterialProfile.drawing_press_depth derives drawing Z as contact_z - press_depth, while drawing_lift_height derives safe drawing Z as at least contact_z + lift_height. Pressure is hard-limited to 0…0.5 mm and lift must be at least 3 mm. In drawing mode every pen-up move is followed by M400 before XY travel, and every pen-down move is followed by M400 before drawing.
