@@ -1,3 +1,4 @@
+    def calibrate(self):
         w=tk.Toplevel(self);w.title('Мастер калибровки A1 + UMTS')
         screen_h=max(560,self.winfo_screenheight());screen_w=max(760,self.winfo_screenwidth())
         width=min(800,max(640,int(screen_w*0.68)));height=min(620,max(480,int(screen_h*0.72)))
@@ -13,14 +14,15 @@
             if not ok.get():
                 messagebox.showwarning('Калибровка','Поставьте галочку подтверждения: значения должны быть измерены на вашем модуле.',parent=w);return
             try:
-                safe_z=float(vs.get());work_z=float(vw.get())
-                if safe_z<=work_z:
+                safe_z=float(vs.get());contact_z=float(vw.get())
+                if safe_z<=contact_z:
                     if not messagebox.askyesno('Проверка Z','Безопасная Z не выше рабочей Z. Вы уверены, что для вашей механики это правильно?',parent=w):
                         return
                 p=self.project.printer
                 p.tool_offset_x=float(vx.get());p.tool_offset_y=float(vy.get())
-                p.work_z=work_z;p.safe_z=safe_z;p.calibrated=True
-                self.project.material.work_z=p.work_z;self.project.material.safe_z=p.safe_z
+                p.work_z=contact_z;p.safe_z=safe_z;p.z_calibration_version=2;p.calibrated=True
+                if self.project.material.mode!='Рисование':self.project.material.work_z=p.work_z
+                self.project.material.safe_z=p.safe_z
                 self._air_test_exported=False
                 w.destroy();self.refresh_all()
             except Exception as exc:
@@ -36,14 +38,14 @@
         values=ttk.LabelFrame(w,text='Измеренные значения',padding=10)
         values.pack(side='bottom',fill='x',padx=10,pady=(4,4))
         values.grid_columnconfigure(1,weight=1)
-        for row,(lab,var) in enumerate([('Offset X, мм',vx),('Offset Y, мм',vy),('Рабочая Z',vw),('Безопасная Z',vs)]):
+        for row,(lab,var) in enumerate([('Offset X, мм',vx),('Offset Y, мм',vy),('Z первого касания, без нажима',vw),('Минимальная безопасная Z',vs)]):
             ttk.Label(values,text=lab).grid(row=row,column=0,sticky='w',padx=(0,10),pady=3)
             ttk.Entry(values,textvariable=var).grid(row=row,column=1,sticky='ew',pady=3)
 
         confirm=ttk.Frame(w,padding=(10,0,10,4));confirm.pack(side='bottom',fill='x')
         ttk.Checkbutton(
             confirm,
-            text='Я физически измерил X/Y/Z и понимаю риск неверной рабочей Z',
+            text='Я измерил Z первого касания БЕЗ нажима и безопасную Z',
             variable=ok
         ).pack(side='left',anchor='w')
 
