@@ -18,8 +18,10 @@ class PrinterProfile:
     tool_offset_y: float = 0.0
     work_z: float = 0.0
     safe_z: float = 5.0
-    park_x: float = 20.0
-    park_y: float = 240.0
+    # Accessible front-edge parking point used for installing/removing UMTS.
+    park_x: float = 128.0
+    park_y: float = 10.0
+    manual_home_required: bool = True
     max_work_speed: float = 120.0  # mm/s
     max_travel_speed: float = 200.0
     max_accel: float = 3000.0
@@ -28,12 +30,14 @@ class PrinterProfile:
     calibrated: bool = False
     pause_gcode: str = "M400 U1"
     start_template: str = (
-        "; NOVATECH CUT SAFE START\n"
-        "; UMTS MUST BE REMOVED BEFORE HOMING\n"
-        "G90\n"
-        "G28\n"
+        "; NOVATECH CUT UMTS START V2\n"
+        "; IMPORTANT: HOME THE PRINTER MANUALLY WITH UMTS REMOVED BEFORE STARTING THIS JOB\n"
+        "; Keep heaters off. No purge, no extrusion, no automatic homing in the job.\n"
+        "M104 S0\n"
+        "M140 S0\n"
         "G90\n"
         "G1 Z{safe_z:.3f} F600\n"
+        "; MOVE TO ACCESSIBLE FRONT EDGE FOR UMTS INSTALLATION\n"
         "G1 X{park_x:.3f} Y{park_y:.3f} F6000\n"
         "M400\n"
         "; INSTALL UMTS, THEN RESUME\n"
@@ -64,7 +68,35 @@ class PrinterProfile:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]):
-        return cls(**d)
+        data=dict(d or {})
+        obj=cls(**data)
+
+        # Migrate the old Novatech Cut default profile. Older builds parked at
+        # X20/Y240 and executed G28 inside the print job. On A1 this is a poor
+        # fit for UMTS because the service/start sequence can occupy the
+        # purge/wipe area and delay installation.
+        old_default_start = (
+            "; NOVATECH CUT SAFE START\n"
+            "; UMTS MUST BE REMOVED BEFORE HOMING\n"
+            "G90\n"
+            "G28\n"
+            "G90\n"
+            "G1 Z{safe_z:.3f} F600\n"
+            "G1 X{park_x:.3f} Y{park_y:.3f} F6000\n"
+            "M400\n"
+            "; INSTALL UMTS, THEN RESUME\n"
+            "M400 U1\n"
+            "G90\n"
+            "G1 Z{safe_z:.3f} F600\n"
+        )
+        defaults=cls()
+        if obj.start_template == old_default_start:
+            obj.start_template=defaults.start_template
+            obj.manual_home_required=True
+        if abs(obj.park_x-20.0)<1e-9 and abs(obj.park_y-240.0)<1e-9:
+            obj.park_x=128.0
+            obj.park_y=10.0
+        return obj
 
 
 @dataclass
