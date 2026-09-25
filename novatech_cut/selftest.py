@@ -179,8 +179,22 @@ def run_self_test() -> None:
     if any(line.strip().startswith("G1 E") or " E" in line.split(";",1)[0] for line in upper.splitlines()):
         raise RuntimeError("UMTS job must not extrude filament")
     pause_pos=upper.find("M400 U1")
-    park_cmd=f"G1 X{project.printer.park_x:g} Y{project.printer.park_y:g}".upper()
-    if pause_pos<0 or park_cmd not in upper[:pause_pos]:
+    if pause_pos<0:
+        raise RuntimeError("UMTS installation pause is missing")
+    park_ok=False
+    for line in gcode[:pause_pos].splitlines():
+        code=line.split(';',1)[0].strip()
+        if not code.upper().startswith(('G0 ','G1 ')):
+            continue
+        vals={}
+        for token in code.split()[1:]:
+            if token[:1].upper() in ('X','Y'):
+                try:vals[token[0].upper()]=float(token[1:])
+                except ValueError:pass
+        if 'X' in vals and 'Y' in vals:
+            if abs(vals['X']-project.printer.park_x)<1e-3 and abs(vals['Y']-project.printer.park_y)<1e-3:
+                park_ok=True
+    if not park_ok:
         raise RuntimeError("Toolhead is not parked at the accessible edge before UMTS installation pause")
     if path_length(square) <= 0 or stats.cut_length_mm <= 0:
         raise RuntimeError("Self-test path statistics are invalid")
