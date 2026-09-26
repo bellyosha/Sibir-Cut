@@ -54,7 +54,7 @@
             try:
                 if old.winfo_exists():old.lift();return
             except Exception:pass
-        w=tk.Toplevel(self);self._wizard=w;w.title('Мастер подготовки и запуска — Сибирь Cut');w.geometry('780x650');w.minsize(700,560);w.transient(self)
+        w=tk.Toplevel(self);self._wizard=w;w.title('Мастер подготовки и запуска — Sibir Cut');w.geometry('780x650');w.minsize(700,560);w.transient(self)
         step={'i':0};titles=['Файл','Размещение','Режим и материал','Калибровка A1 + UMTS','Экспорт и запуск']
         top=ttk.Frame(w,padding=12);top.pack(fill='x');step_label=ttk.Label(top,text='',style='Title.TLabel');step_label.pack(anchor='w');desc=ttk.Label(top,text='',wraplength=730);desc.pack(anchor='w',pady=(4,0))
         body=ttk.Frame(w,padding=(16,8));body.pack(fill='both',expand=True)
@@ -131,7 +131,7 @@
                 ttk.Button(body,text='Открыть мастер калибровки',command=self.calibrate).pack(anchor='w',pady=8);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
             else:
                 desc.config(text='Создаётся прямой .gcode для A1. Его нельзя заново нарезать в Orca.')
-                note('Сибирь Cut создаёт прямой .gcode без штатного стартового кода Bambu. Скопируйте его на microSD и запускайте с экрана A1. Orca для запуска рабочего файла не используется.')
+                note('Sibir Cut создаёт прямой .gcode без штатного стартового кода Bambu. Скопируйте его на microSD и запускайте с экрана A1. Orca для запуска рабочего файла не используется.')
                 note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.\n2. Скопируйте его на microSD и вставьте карту в A1.\n3. UMTS СНЯТ. На экране A1 вручную выполните Home.\n4. Только после завершения Home запустите файл.\n5. Файл принудительно задаёт M104 S0 / M140 S0, затем головка идёт к переднему краю X230 Y10.\n6. В X230 Y10 выполняется фиксированное ожидание установки UMTS. Головка НЕ должна уезжать к очистке сопла.\n7. Выполнится резка/рисование без нагрева и экструзии.\n8. В конце головка снова идёт к X230 Y10 и остаётся там на время ожидания снятия UMTS.','warn')
                 def final_export():
                     if self.export(show_message=False):messagebox.showinfo('Рабочий файл','Прямой .gcode создан. Скопируйте его на microSD и запускайте с экрана A1, без Orca.',parent=w);render()
