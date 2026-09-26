@@ -1,15 +1,15 @@
-#define MyAppName "Сибирь Cut"
-#define MyAppVersion "0.2.12"
+#define MyAppName "Sibir Cut"
+#define MyAppVersion "0.2.13"
 #define MyAppExeName "SibirCut.exe"
 
 [Setup]
 AppId={{0F38D788-9A41-4E9B-9DDA-5FC5E88B9301}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-DefaultDirName={localappdata}\Programs\Сибирь Cut
-DefaultGroupName=Сибирь Cut
+DefaultDirName={localappdata}\Programs\Sibir Cut
+DefaultGroupName=Sibir Cut
 OutputDir=..\dist
-OutputBaseFilename=Sibir_Cut_Setup_0.2.12_x64
+OutputBaseFilename=Sibir_Cut_Setup_0.2.13_x64
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -29,11 +29,11 @@ Source: "..\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Сибирь Cut"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\Сибирь Cut"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\Sibir Cut"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\Sibir Cut"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Создать ярлык на рабочем столе"
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Запустить Сибирь Cut"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Запустить Sibir Cut"; Flags: nowait postinstall skipifsilent
