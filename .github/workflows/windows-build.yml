@@ -56,14 +56,14 @@ jobs:
       - name: Test frozen EXE
         shell: pwsh
         run: |
-          if (!(Test-Path "dist/NovatechCut.exe")) { throw "NovatechCut.exe was not created" }
-          $p = Start-Process -FilePath (Resolve-Path "dist/NovatechCut.exe") -ArgumentList "--self-test" -Wait -PassThru
+          if (!(Test-Path "dist/SibirCut.exe")) { throw "SibirCut.exe was not created" }
+          $p = Start-Process -FilePath (Resolve-Path "dist/SibirCut.exe") -ArgumentList "--self-test" -Wait -PassThru
           if ($p.ExitCode -ne 0) {
             $log = Join-Path $env:TEMP "novatech-cut-selftest-error.txt"
             if (Test-Path $log) { Get-Content $log }
             throw "Frozen EXE self-test failed: exit $($p.ExitCode)"
           }
-          $ui = Start-Process -FilePath (Resolve-Path "dist/NovatechCut.exe") -ArgumentList "--ui-self-test" -Wait -PassThru
+          $ui = Start-Process -FilePath (Resolve-Path "dist/SibirCut.exe") -ArgumentList "--ui-self-test" -Wait -PassThru
           if ($ui.ExitCode -ne 0) {
             $log = Join-Path $env:TEMP "novatech-cut-ui-selftest-error.txt"
             if (Test-Path $log) { Get-Content $log }
@@ -75,17 +75,17 @@ jobs:
         run: |
           Remove-Item portable -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force portable,portable/docs | Out-Null
-          Copy-Item dist/NovatechCut.exe portable/
+          Copy-Item dist/SibirCut.exe portable/
           Copy-Item docs/*.md portable/docs/
           Copy-Item README.md,LICENSE.txt,THIRD_PARTY_NOTICES.md portable/
-          Compress-Archive portable/* dist/Novatech_Cut_Portable_Windows_x64.zip -Force
+          Compress-Archive portable/* dist/Sibir_Cut_Portable_Windows_x64.zip -Force
 
       - name: Test portable ZIP
         shell: pwsh
         run: |
           Remove-Item portable-test -Recurse -Force -ErrorAction SilentlyContinue
-          Expand-Archive dist/Novatech_Cut_Portable_Windows_x64.zip portable-test -Force
-          $p = Start-Process -FilePath (Resolve-Path "portable-test/NovatechCut.exe") -ArgumentList "--self-test" -Wait -PassThru
+          Expand-Archive dist/Sibir_Cut_Portable_Windows_x64.zip portable-test -Force
+          $p = Start-Process -FilePath (Resolve-Path "portable-test/SibirCut.exe") -ArgumentList "--self-test" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Portable EXE self-test failed: exit $($p.ExitCode)" }
 
       - name: Install Inno Setup
@@ -99,16 +99,16 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "build\installer.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!(Test-Path "dist/Novatech_Cut_Setup_0.2.10_x64.exe")) { throw "Installer was not created" }
+          if (!(Test-Path "dist/Sibir_Cut_Setup_0.2.11_x64.exe")) { throw "Installer was not created" }
 
       - name: Test installer on clean directory
         shell: pwsh
         run: |
-          $installDir = Join-Path $env:RUNNER_TEMP "NovatechCutInstalled"
-          $setup = Resolve-Path "dist/Novatech_Cut_Setup_0.2.10_x64.exe"
+          $installDir = Join-Path $env:RUNNER_TEMP "SibirCutInstalled"
+          $setup = Resolve-Path "dist/Sibir_Cut_Setup_0.2.11_x64.exe"
           $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART",("/DIR=" + $installDir) -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Installer failed: exit $($p.ExitCode)" }
-          $installedExe = Join-Path $installDir "NovatechCut.exe"
+          $installedExe = Join-Path $installDir "SibirCut.exe"
           if (!(Test-Path $installedExe)) { throw "Installed EXE not found" }
           $p2 = Start-Process -FilePath $installedExe -ArgumentList "--self-test" -Wait -PassThru
           if ($p2.ExitCode -ne 0) { throw "Installed EXE self-test failed: exit $($p2.ExitCode)" }
@@ -118,16 +118,16 @@ jobs:
         run: |
           Remove-Item novatech_cut/app.py.part* -Force
           $items = @("novatech_cut","build","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
-          Compress-Archive $items dist/Novatech_Cut_v0.2.10_SOURCE.zip -Force
+          Compress-Archive $items dist/Sibir_Cut_v0.2.11_SOURCE.zip -Force
 
       - name: Write SHA256 checksums
         shell: pwsh
         run: |
           @(
-            "NovatechCut.exe",
-            "Novatech_Cut_Portable_Windows_x64.zip",
-            "Novatech_Cut_Setup_0.2.10_x64.exe",
-            "Novatech_Cut_v0.2.10_SOURCE.zip"
+            "SibirCut.exe",
+            "Sibir_Cut_Portable_Windows_x64.zip",
+            "Sibir_Cut_Setup_0.2.11_x64.exe",
+            "Sibir_Cut_v0.2.11_SOURCE.zip"
           ) | ForEach-Object {
             $h = Get-FileHash ("dist/" + $_) -Algorithm SHA256
             "$($h.Hash.ToLower())  $_"
@@ -136,11 +136,11 @@ jobs:
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Novatech-Cut-Windows-v0.2.10
+          name: Sibir-Cut-Windows-v0.2.11
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/Novatech_Cut_Setup_0.2.10_x64.exe
-            dist/Novatech_Cut_Portable_Windows_x64.zip
-            dist/Novatech_Cut_v0.2.10_SOURCE.zip
+            dist/Sibir_Cut_Setup_0.2.11_x64.exe
+            dist/Sibir_Cut_Portable_Windows_x64.zip
+            dist/Sibir_Cut_v0.2.11_SOURCE.zip
             dist/SHA256SUMS-WINDOWS.txt
