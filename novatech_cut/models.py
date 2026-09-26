@@ -37,7 +37,7 @@ class PrinterProfile:
     calibrated: bool = False
     pause_gcode: str = "M400 S{install_wait_seconds:.0f}"
     start_template: str = (
-        "; NOVATECH CUT UMTS START V3\n"
+        "; SIBIR CUT UMTS START V3\n"
         "; IMPORTANT: HOME THE PRINTER MANUALLY WITH UMTS REMOVED BEFORE STARTING THIS JOB\n"
         "; No firmware pause command is used: M400 U1 would move the head to the wiper area.\n"
         "M104 S0\n"
@@ -58,7 +58,7 @@ class PrinterProfile:
         "M400\n"
         "; REMOVE UMTS NOW - HEAD REMAINS HERE DURING THIS TIMED HOLD\n"
         "M400 S{remove_wait_seconds:.0f}\n"
-        "; END NOVATECH CUT JOB\n"
+        "; END SIBIR CUT JOB\n"
     )
 
     @property
@@ -123,6 +123,34 @@ class PrinterProfile:
             if abs(float(getattr(obj,'install_wait_seconds',0) or 0)-300.0)<1e-9: obj.install_wait_seconds=10.0
             if abs(float(getattr(obj,'remove_wait_seconds',0) or 0)-180.0)<1e-9: obj.remove_wait_seconds=10.0
             obj.service_wait_version=3
+        # Rebrand only untouched 0.2.10 default templates. Custom user G-code
+        # is preserved exactly as entered.
+        old_brand_start_v3 = (
+            "; NOVATECH CUT UMTS START V3\n"
+            "; IMPORTANT: HOME THE PRINTER MANUALLY WITH UMTS REMOVED BEFORE STARTING THIS JOB\n"
+            "; No firmware pause command is used: M400 U1 would move the head to the wiper area.\n"
+            "M104 S0\n"
+            "M140 S0\n"
+            "G90\n"
+            "G1 Z{safe_z:.3f} F600\n"
+            "; MOVE TO ACCESSIBLE FRONT EDGE FOR UMTS INSTALLATION\n"
+            "G1 X{park_x:.3f} Y{park_y:.3f} F6000\n"
+            "M400\n"
+            "; INSTALL UMTS NOW - HEAD REMAINS HERE DURING THIS TIMED HOLD\n"
+            "M400 S{install_wait_seconds:.0f}\n"
+            "G90\n"
+            "G1 Z{safe_z:.3f} F600\n"
+        )
+        old_brand_end_v3 = (
+            "G1 Z{safe_z:.3f} F600\n"
+            "G1 X{park_x:.3f} Y{park_y:.3f} F6000\n"
+            "M400\n"
+            "; REMOVE UMTS NOW - HEAD REMAINS HERE DURING THIS TIMED HOLD\n"
+            "M400 S{remove_wait_seconds:.0f}\n"
+            "; END NOVATECH CUT JOB\n"
+        )
+        if obj.start_template == old_brand_start_v3: obj.start_template=defaults.start_template
+        if obj.end_template == old_brand_end_v3: obj.end_template=defaults.end_template
         if ((abs(obj.park_x-20.0)<1e-9 and abs(obj.park_y-240.0)<1e-9)
                 or (abs(obj.park_x-128.0)<1e-9 and abs(obj.park_y-10.0)<1e-9)):
             obj.park_x=230.0
