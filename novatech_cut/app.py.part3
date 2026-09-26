@@ -1,3 +1,5 @@
+            except Exception as e:messagebox.showerror('Проект',str(e))
+    def printer_profile(self):
         w=tk.Toplevel(self);w.title('Профиль оборудования — Bambu Lab A1 + UMTS');w.geometry('760x760');w.transient(self);w.grab_set();p=self.project.printer
         outer=ttk.Frame(w,padding=10);outer.pack(fill='both',expand=True);canvas=tk.Canvas(outer,highlightthickness=0);sb=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview);inner=ttk.Frame(canvas);inner.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')));canvas.create_window((0,0),window=inner,anchor='nw');canvas.configure(yscrollcommand=sb.set);canvas.pack(side='left',fill='both',expand=True);sb.pack(side='right',fill='y')
         vals={}
@@ -131,19 +133,19 @@
                 desc.config(text='Сначала проверяем траекторию без касания материала. Это обязательный этап перед первым реальным запуском.')
                 if self._air_test_exported:note('✓ Воздушный тест для текущего задания сохранён.','ok')
                 else:note('Воздушный тест ещё не сохранён.','warn')
-                note('1. UMTS снят.\n2. На экране A1 ВРУЧНУЮ выполните Home.\n3. После завершения Home запустите воздушный файл.\n4. Файл сразу отключит нагрев сопла/стола и переместит головку к переднему краю стола (по умолчанию X128 Y10).\n5. На паузе установите UMTS и продолжите.\n6. Убедитесь, что инструмент нигде не касается стола и вся траектория остаётся в нужной зоне.')
+                note('1. UMTS снят.\n2. На экране A1 ВРУЧНУЮ выполните Home.\n3. После завершения Home запустите воздушный файл.\n4. Файл сразу отключит нагрев сопла/стола и переместит головку к переднему краю стола (по умолчанию X230 Y10).\n5. На паузе установите UMTS и продолжите.\n6. Убедитесь, что инструмент нигде не касается стола и вся траектория остаётся в нужной зоне.')
                 def air():
                     if self.export(air=True,show_message=False):messagebox.showinfo('Воздушный тест','Файл сохранён. Перенесите его на принтер и проверьте движение без касания материала.',parent=w);render()
                 ttk.Button(body,text='Сохранить файл воздушного теста…',command=air).pack(anchor='w',pady=8)
             else:
-                desc.config(text='После успешного воздушного теста можно сформировать рабочий файл и запустить его на A1.')
-                note('В этой версии Novatech Cut готовит проверенный .gcode.3mf, но не отправляет его на принтер по сети автоматически.')
-                note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.3mf.\n2. Перенесите файл на носитель/в принтер.\n3. UMTS СНЯТ. На экране A1 вручную выполните Home.\n4. Только после завершения Home запустите файл.\n5. Файл принудительно задаёт M104 S0 / M140 S0, затем головка идёт к переднему краю X128 Y10.\n6. На первой паузе установите UMTS и продолжите.\n7. Выполнится резка/рисование без нагрева и экструзии.\n8. В конце головка снова идёт к переднему краю; на второй паузе снимите UMTS.','warn')
+                desc.config(text='После успешного воздушного теста создаётся прямой .gcode для A1. Его нельзя заново нарезать в Orca.')
+                note('Novatech Cut создаёт прямой .gcode без штатного стартового кода Bambu. Скопируйте его на microSD и запускайте с экрана A1. Orca для запуска рабочего файла не используется.')
+                note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.\n2. Скопируйте его на microSD и вставьте карту в A1.\n3. UMTS СНЯТ. На экране A1 вручную выполните Home.\n4. Только после завершения Home запустите файл.\n5. Файл принудительно задаёт M104 S0 / M140 S0, затем головка идёт к переднему краю X230 Y10.\n6. На первой паузе установите UMTS и продолжите.\n7. Выполнится резка/рисование без нагрева и экструзии.\n8. В конце головка снова идёт к переднему краю; на второй паузе снимите UMTS.','warn')
                 def final_export():
                     if not self._air_test_exported:
                         if not messagebox.askyesno('Воздушный тест','Для текущего задания не отмечен сохранённый воздушный тест. Всё равно перейти к экспорту?',parent=w):return
-                    if self.export(air=False,show_message=False):messagebox.showinfo('Рабочий файл','Рабочий файл создан. Теперь перенесите его на принтер по инструкции в этом окне.',parent=w);render()
-                ttk.Button(body,text='Экспортировать рабочий .gcode.3mf…',style='Danger.TButton',command=final_export).pack(anchor='w',pady=8)
+                    if self.export(air=False,show_message=False):messagebox.showinfo('Рабочий файл','Прямой .gcode создан. Скопируйте его на microSD и запускайте с экрана A1, без Orca.',parent=w);render()
+                ttk.Button(body,text='Экспортировать прямой .gcode для A1…',style='Danger.TButton',command=final_export).pack(anchor='w',pady=8)
                 ttk.Button(body,text='Открыть папку последнего экспорта',command=open_export_folder).pack(anchor='w')
         def go(delta):
             i=step['i']
@@ -160,6 +162,3 @@
                 if i==len(titles)-1:w.destroy();return
             step['i']=max(0,min(len(titles)-1,i+delta));render()
         back.config(command=lambda:go(-1));nextb.config(command=lambda:go(1))
-        def closed():self._wizard=None;w.destroy()
-        w.protocol('WM_DELETE_WINDOW',closed);render()
-
