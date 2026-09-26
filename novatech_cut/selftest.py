@@ -196,6 +196,18 @@ def _drawing_z_safety_regression_test() -> None:
     else:
         raise RuntimeError('Excessive drawing pressure was not blocked')
 
+def _direct_gcode_regression_test() -> None:
+    project=Project();project.printer.calibrated=True
+    project.printer.work_z=5.0;project.printer.safe_z=8.0
+    project.material.mode='Рисование';project.material.drawing_press_depth=0.05;project.material.drawing_lift_height=5.0
+    paths=[[(20.0,20.0),(40.0,20.0)]]
+    gcode,_=generate_gcode(paths,project.printer,project.material,air_test=True)
+    u=gcode.upper()
+    if 'M109 ' in u or 'G1 E' in u or 'G28' in u:
+        raise RuntimeError('Direct A1 G-code contains a standard print startup command')
+    if 'G1 X230 Y10' not in u and 'G1 X230.0 Y10.0' not in u:
+        raise RuntimeError('Direct A1 G-code does not park away from the nozzle-wiper area')
+
 def run_self_test() -> None:
     project = Project()
     project.printer.calibrated = True
@@ -249,6 +261,7 @@ def run_self_test() -> None:
         _drawing_fill_regression_test()
         _bounds_regression_test()
         _drawing_z_safety_regression_test()
+        _direct_gcode_regression_test()
 
 def main() -> int:
     try:
