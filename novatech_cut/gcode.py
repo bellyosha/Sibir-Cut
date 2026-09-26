@@ -141,7 +141,7 @@ def validate_gcode(gcode: str, printer: PrinterProfile, require_pause=True):
                 if p[:1].upper()=='S':
                     try: wait_s=float(p[1:])
                     except ValueError: errors.append(f"Строка {n}: неверный параметр {p}")
-            if wait_s is not None and wait_s>=30:
+            if wait_s is not None and wait_s>=1:
                 service_wait_count+=1
                 if service_wait_count==1: module_installed=True
                 elif service_wait_count>=2: module_installed=False
