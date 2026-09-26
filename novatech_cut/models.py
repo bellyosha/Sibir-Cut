@@ -26,9 +26,9 @@ class PrinterProfile:
     manual_home_required: bool = True
     # Bambu firmware M400 U1 always parks in its own pause/wiper location.
     # UMTS therefore uses an in-place timed service hold at park_x/park_y.
-    service_wait_version: int = 2
-    install_wait_seconds: float = 300.0
-    remove_wait_seconds: float = 180.0
+    service_wait_version: int = 3
+    install_wait_seconds: float = 10.0
+    remove_wait_seconds: float = 10.0
     max_work_speed: float = 120.0  # mm/s
     max_travel_speed: float = 200.0
     max_accel: float = 3000.0
@@ -78,6 +78,7 @@ class PrinterProfile:
         data=dict(d or {})
         had_z_v2=('z_calibration_version' in data and int(data.get('z_calibration_version') or 0)>=2)
         had_service_v2=('service_wait_version' in data and int(data.get('service_wait_version') or 0)>=2)
+        had_service_v3=('service_wait_version' in data and int(data.get('service_wait_version') or 0)>=3)
         obj=cls(**data)
         if not had_z_v2:
             # Previous builds stored work_z as an arbitrary pressed working Z.
@@ -113,9 +114,15 @@ class PrinterProfile:
             obj.start_template=defaults.start_template
             obj.end_template=defaults.end_template
             obj.pause_gcode=defaults.pause_gcode
-            obj.service_wait_version=2
-            if float(getattr(obj,'install_wait_seconds',0) or 0)<30: obj.install_wait_seconds=300.0
-            if float(getattr(obj,'remove_wait_seconds',0) or 0)<30: obj.remove_wait_seconds=180.0
+            obj.service_wait_version=3
+            if float(getattr(obj,'install_wait_seconds',0) or 0)<=0: obj.install_wait_seconds=10.0
+            if float(getattr(obj,'remove_wait_seconds',0) or 0)<=0: obj.remove_wait_seconds=10.0
+        if not had_service_v3:
+            # 0.2.9 shipped with very long default service holds (300/180 s).
+            # Shorten only those legacy defaults; preserve any user-custom value.
+            if abs(float(getattr(obj,'install_wait_seconds',0) or 0)-300.0)<1e-9: obj.install_wait_seconds=10.0
+            if abs(float(getattr(obj,'remove_wait_seconds',0) or 0)-180.0)<1e-9: obj.remove_wait_seconds=10.0
+            obj.service_wait_version=3
         if ((abs(obj.park_x-20.0)<1e-9 and abs(obj.park_y-240.0)<1e-9)
                 or (abs(obj.park_x-128.0)<1e-9 and abs(obj.park_y-10.0)<1e-9)):
             obj.park_x=230.0
