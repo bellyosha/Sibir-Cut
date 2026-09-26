@@ -8,15 +8,16 @@ from .geometry import bbox, path_length, transformed_paths
 from .gcode import generate_gcode, GCodeError, analyze_path_bounds
 from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
+from .lan_gui import open_lan_control
 
-APP_TITLE='Сибирь Cut 0.2.11'
+APP_TITLE='Сибирь Cut 0.2.12'
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__(); self.title(APP_TITLE); self.geometry('1400x850'); self.minsize(1050,680)
         self.project=Project();self.current_file=None;self.zoom=2.2;self.origin=(28,28);self.history=[];self.future=[]
         self.prepared_paths=[];self.prepare_error=None;self._busy=False;self._busy_win=None
-        self._drag=None;self._drag_active=False;self.last_export_path=None
+        self._drag=None;self._drag_active=False;self.last_export_path=None;self._lan_window=None;self._lan_client=None
         self._style();self._build();self.refresh_all()
     def _style(self):
         s=ttk.Style(self); 
@@ -26,7 +27,7 @@ class App(tk.Tk):
         s.configure('Title.TLabel',font=('Segoe UI',12,'bold'))
     def _build(self):
         top=ttk.Frame(self,padding=8);top.pack(fill='x')
-        for text,cmd in [('Импорт',self.do_import),('Открыть проект',self.open_project),('Сохранить',self.save_project),('Отмена',self.undo),('Повтор',self.redo),('Профиль принтера',self.printer_profile),('Калибровка',self.calibrate),('Анимация',self.animate_preview),('Мастер запуска',self.launch_wizard)]:
+        for text,cmd in [('Импорт',self.do_import),('Открыть проект',self.open_project),('Сохранить',self.save_project),('Отмена',self.undo),('Повтор',self.redo),('Профиль принтера',self.printer_profile),('LAN управление',lambda:open_lan_control(self)),('Калибровка',self.calibrate),('Анимация',self.animate_preview),('Мастер запуска',self.launch_wizard)]:
             ttk.Button(top,text=text,command=cmd).pack(side='left',padx=3)
         ttk.Button(top,text='−',width=3,command=lambda:self.set_zoom(self.zoom/1.2)).pack(side='right');ttk.Button(top,text='+',width=3,command=lambda:self.set_zoom(self.zoom*1.2)).pack(side='right')
         main=ttk.Panedwindow(self,orient='horizontal');main.pack(fill='both',expand=True,padx=8,pady=(0,8))
