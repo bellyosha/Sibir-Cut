@@ -3,7 +3,7 @@
 ## Bambu Cuts
 Reference project: `unrelatedlabs/bambu-cuts`.
 License declared by upstream: GNU GPL-3.0-or-later for software; CC BY-NC 4.0 for its 3D model files.
-Novatech Cut does **not** include upstream Bambu Cuts source code or its 3D models. The repository was used as a behavioural/format reference for Bambu cutting workflows and 3MF integration.
+Сибирь Cut does **not** include upstream Bambu Cuts source code or its 3D models. The repository was used as a behavioural/format reference for Bambu cutting workflows and 3MF integration.
 
 ## Bambu Studio
 Bambu Studio source/configuration was consulted to verify the pause command `M400 U1` and 3MF naming conventions. No Bambu Studio source files are bundled here.
