@@ -10,7 +10,7 @@ from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
 from .lan_gui import open_lan_control
 
-APP_TITLE='Сибирь Cut 0.2.12'
+APP_TITLE='Sibir Cut 0.2.13'
 
 class App(tk.Tk):
     def __init__(self):
@@ -112,7 +112,7 @@ class App(tk.Tk):
         if i is not None:self.checkpoint();self.project.objects.pop(i);self.refresh_all()
     def _run_background(self, title, fn, on_success):
         if self._busy:
-            messagebox.showinfo('Сибирь Cut','Сейчас уже выполняется обработка. Дождитесь её завершения.',parent=self)
+            messagebox.showinfo('Sibir Cut','Сейчас уже выполняется обработка. Дождитесь её завершения.',parent=self)
             return
         self._busy=True
         w=tk.Toplevel(self);self._busy_win=w;w.title(title);w.geometry('430x130');w.transient(self);w.resizable(False,False)
