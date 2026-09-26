@@ -86,7 +86,7 @@ def generate_gcode(paths: List[Path], printer: PrinterProfile, material: Materia
     work_speed=min(material.work_speed,printer.max_work_speed)*60
     travel_speed=min(material.travel_speed,printer.max_travel_speed)*60
     lines=[]
-    lines.extend(printer.start_template.format(safe_z=safe_z,park_x=printer.park_x,park_y=printer.park_y).splitlines())
+    lines.extend(printer.start_template.format(safe_z=safe_z,park_x=printer.park_x,park_y=printer.park_y,install_wait_seconds=printer.install_wait_seconds,remove_wait_seconds=printer.remove_wait_seconds).splitlines())
     lines.append(f"; MODE: {'AIR TEST' if air_test else material.mode}")
     lines.append(f"; MATERIAL: {material.name}")
     if material.mode=='Рисование':
@@ -114,7 +114,7 @@ def generate_gcode(paths: List[Path], printer: PrinterProfile, material: Materia
             lines.append(f"G1 Z{_fmt(safe_z)} F600 ; tool up")
             if material.mode=='Рисование':
                 lines.append("M400 ; pen fully clear before next move")
-    lines.extend(printer.end_template.format(safe_z=safe_z,park_x=printer.park_x,park_y=printer.park_y).splitlines())
+    lines.extend(printer.end_template.format(safe_z=safe_z,park_x=printer.park_x,park_y=printer.park_y,install_wait_seconds=printer.install_wait_seconds,remove_wait_seconds=printer.remove_wait_seconds).splitlines())
     gcode='\n'.join(lines)+'\n'
     validate_gcode(gcode, printer, require_pause=True)
     est=(cut_len/max(0.1,work_speed/60))+(travel_len/max(0.1,travel_speed/60))+len(paths)*material.passes*0.6+4
@@ -122,7 +122,7 @@ def generate_gcode(paths: List[Path], printer: PrinterProfile, material: Materia
     return gcode, JobStats(cut_len,travel_len,est,b,len(paths),material.passes)
 
 def validate_gcode(gcode: str, printer: PrinterProfile, require_pause=True):
-    errors=[]; absolute=True; pos={'X':0.0,'Y':0.0,'Z':0.0}; module_installed=False; pause_count=0
+    errors=[]; absolute=True; pos={'X':0.0,'Y':0.0,'Z':0.0}; module_installed=False; service_wait_count=0
     allowed={'G0','G1','G28','G90','G91','G4','M400','M104','M140'}
     xmin,ymin,xmax,ymax=printer.safe_bounds
     for n,raw in enumerate(gcode.splitlines(),1):
@@ -134,9 +134,17 @@ def validate_gcode(gcode: str, printer: PrinterProfile, require_pause=True):
         if cmd=='G91': absolute=False;continue
         if cmd=='M400':
             if any(p.upper()=='U1' for p in parts[1:]):
-                pause_count+=1
-                if pause_count==1: module_installed=True
-                elif pause_count>=2: module_installed=False
+                errors.append(f"Строка {n}: M400 U1 запрещён для UMTS — прошивка A1 уводит головку в зону очистки сопла")
+                continue
+            wait_s=None
+            for p in parts[1:]:
+                if p[:1].upper()=='S':
+                    try: wait_s=float(p[1:])
+                    except ValueError: errors.append(f"Строка {n}: неверный параметр {p}")
+            if wait_s is not None and wait_s>=30:
+                service_wait_count+=1
+                if service_wait_count==1: module_installed=True
+                elif service_wait_count>=2: module_installed=False
             continue
         if cmd in ('M104','M140'):
             sval=None
@@ -170,7 +178,7 @@ def validate_gcode(gcode: str, printer: PrinterProfile, require_pause=True):
     upper=gcode.upper()
     for banned in ('M109','M190','G29','M82','M83'):
         if re.search(rf'(^|\n)\s*{banned}\b',upper):errors.append(f"Запрещенная команда {banned}")
-    if require_pause and pause_count<2:errors.append("Нет обязательных пауз установки/снятия UMTS")
+    if require_pause and service_wait_count<2:errors.append("Нет двух обязательных ожиданий установки/снятия UMTS на краю стола")
     if not re.search(r'G1\s+Z[-+\d.]',gcode,re.I):errors.append("Нет управляемого подъема Z")
     if errors: raise GCodeError('\n'.join(dict.fromkeys(errors)))
     return True
