@@ -205,6 +205,10 @@ def _direct_gcode_regression_test() -> None:
     u=gcode.upper()
     if 'M109 ' in u or 'G1 E' in u or 'G28' in u:
         raise RuntimeError('Direct A1 G-code contains a standard print startup command')
+    if 'M400 U1' in u:
+        raise RuntimeError('Direct A1 G-code contains firmware pause that relocates the toolhead')
+    if u.count('M400 S')<2:
+        raise RuntimeError('Direct A1 G-code must hold in place for install and removal')
     park_ok=False
     for line in gcode.splitlines():
         code=line.split(';',1)[0].strip().upper()
@@ -234,13 +238,17 @@ def run_self_test() -> None:
         raise RuntimeError("UMTS job must not contain automatic homing")
     if "M104 S0" not in upper or "M140 S0" not in upper:
         raise RuntimeError("UMTS job must explicitly disable nozzle and bed heaters")
+    if "M400 U1" in upper:
+        raise RuntimeError("Firmware pause M400 U1 must not be used because A1 moves to the wiper area")
     if any(line.strip().startswith("G1 E") or " E" in line.split(";",1)[0] for line in upper.splitlines()):
         raise RuntimeError("UMTS job must not extrude filament")
-    pause_pos=upper.find("M400 U1")
-    if pause_pos<0:
-        raise RuntimeError("UMTS installation pause is missing")
+    timed_waits=[i for i,line in enumerate(gcode.splitlines()) if line.strip().upper().startswith("M400 S")]
+    if len(timed_waits)<2:
+        raise RuntimeError("UMTS install/remove timed holds are missing")
+    first_wait_line=timed_waits[0]
+    prefix='\n'.join(gcode.splitlines()[:first_wait_line])
     park_ok=False
-    for line in gcode[:pause_pos].splitlines():
+    for line in prefix.splitlines():
         code=line.split(';',1)[0].strip()
         if not code.upper().startswith(('G0 ','G1 ')):
             continue
