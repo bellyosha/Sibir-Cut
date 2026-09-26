@@ -1,4 +1,4 @@
-# Технические заметки Novatech Cut 0.2.9
+# Технические заметки Novatech Cut 0.2.10
 
 Дата проверки: 24.09.2026.
 
@@ -13,7 +13,7 @@
 
 ## Bambu-specific decisions
 
-The verified pause command used by Bambu Studio profiles is `M400 U1`. Starting with 0.2.9 the UMTS job contains no automatic `G28`; the operator must home manually before launching the file with UMTS removed. The file explicitly sends `M104 S0` and `M140 S0`, parks at the accessible front edge, then pauses for installation. Non-zero heating, extrusion and ABL are rejected. A second pause is emitted after returning to the front-edge park so the user can remove UMTS.
+The verified pause command used by Bambu Studio profiles is `M400 U1`. Starting with 0.2.10 the UMTS job contains no automatic `G28`; the operator must home manually before launching the file with UMTS removed. The file explicitly sends `M104 S0` and `M140 S0`, parks at the accessible front edge, then pauses for installation. Non-zero heating, extrusion and ABL are rejected. A second pause is emitted after returning to the front-edge park so the user can remove UMTS.
 
 The `.gcode.3mf` writer creates the OPC/3MF container, `Metadata/plate_1.gcode`, uppercase MD5, plate metadata, slice metadata, project metadata and thumbnails. The archive is re-opened and checksum-validated by tests.
 
@@ -28,14 +28,14 @@ The repository contains the Windows CI workflow that builds and self-tests the f
 
 ## Drawing Z safety
 
-0.2.9 changes drawing Z semantics. PrinterProfile.work_z is treated as calibrated first-contact Z (no spring compression). MaterialProfile.drawing_press_depth derives drawing Z as contact_z - press_depth, while drawing_lift_height derives safe drawing Z as at least contact_z + lift_height. Pressure is hard-limited to 0…0.5 mm and lift must be at least 3 mm. In drawing mode every pen-up move is followed by M400 before XY travel, and every pen-down move is followed by M400 before drawing.
+0.2.10 changes drawing Z semantics. PrinterProfile.work_z is treated as calibrated first-contact Z (no spring compression). MaterialProfile.drawing_press_depth derives drawing Z as contact_z - press_depth, while drawing_lift_height derives safe drawing Z as at least contact_z + lift_height. Pressure is hard-limited to 0…0.5 mm and lift must be at least 3 mm. In drawing mode every pen-up move is followed by M400 before XY travel, and every pen-down move is followed by M400 before drawing.
 
 
 ## Direct A1 G-code handoff
 
-0.2.9 changes the hardware handoff path. The executable job is now plain `.gcode`, intended to be copied to microSD and started from the A1 screen. The application no longer uses `.gcode.3mf` as the primary UMTS job because the normal slicer/project workflow can introduce the standard A1 machine-start sequence before the custom path. Orca receives only a geometry-only `*_ORCA_PREVIEW.3mf`. The default UMTS install/remove park is X230 Y10, away from the A1 wipe area.
+0.2.10 changes the hardware handoff path. The executable job is now plain `.gcode`, intended to be copied to microSD and started from the A1 screen. The application no longer uses `.gcode.3mf` as the primary UMTS job because the normal slicer/project workflow can introduce the standard A1 machine-start sequence before the custom path. Orca receives only a geometry-only `*_ORCA_PREVIEW.3mf`. The default UMTS install/remove park is X230 Y10, away from the A1 wipe area.
 
 
 ## In-place UMTS service wait
 
-Bambu firmware controls the parking behavior of `M400 U1`; it may relocate the A1 toolhead to the printer's pause/wiper area. 0.2.9 therefore prohibits `M400 U1` in generated UMTS jobs. The service sequence is now: move to configured park XY, flush moves with `M400`, then hold in place using `M400 S<seconds>`. Old profiles containing `M400 U1` are migrated to the V3 start/end templates.
+Bambu firmware controls the parking behavior of `M400 U1`; it may relocate the A1 toolhead to the printer's pause/wiper area. 0.2.10 therefore prohibits `M400 U1` in generated UMTS jobs. The service sequence is now: move to configured park XY, flush moves with `M400`, then hold in place using `M400 S<seconds>`. Old profiles containing `M400 U1` are migrated to the V3 start/end templates.
