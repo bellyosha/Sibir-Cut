@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 try:
     import paho.mqtt.client as mqtt
-except Exception:  # pragma: no cover - surfaced as a clear runtime error in GUI
+except Exception:  # pragma: no cover
     mqtt = None
 
 
@@ -20,7 +20,6 @@ class BambuLanError(RuntimeError):
 
 
 def _merge_dict(dst: dict[str, Any], src: dict[str, Any]) -> None:
-    """Merge partial MQTT reports without dropping fields from prior reports."""
     for key, value in src.items():
         if isinstance(value, dict) and isinstance(dst.get(key), dict):
             _merge_dict(dst[key], value)
@@ -31,6 +30,16 @@ def _merge_dict(dst: dict[str, Any], src: dict[str, Any]) -> None:
 def _next_sequence(value: int) -> tuple[int, str]:
     value = (int(value) + 1) % 2_000_000_000
     return value, str(value)
+
+
+def _hex_flag(value: Any, bit: int) -> bool:
+    try:
+        raw = str(value or "0").strip().lower()
+        if raw.startswith("0x"):
+            raw = raw[2:]
+        return bool((int(raw or "0", 16) >> int(bit)) & 1)
+    except Exception:
+        return False
 
 
 def build_gcode_request(sequence_id: str, gcode: str) -> dict[str, Any]:
@@ -47,20 +56,37 @@ def build_gcode_request(sequence_id: str, gcode: str) -> dict[str, Any]:
 
 
 def build_pushall_request(sequence_id: str) -> dict[str, Any]:
+    return {"pushing": {"sequence_id": str(sequence_id), "command": "pushall"}}
+
+
+def build_home_request(sequence_id: str) -> dict[str, Any]:
+    # Same MQTT command used by current OrcaSlicer when fun bit 32 is set.
     return {
-        "pushing": {
+        "print": {
             "sequence_id": str(sequence_id),
-            "command": "pushall",
+            "command": "back_to_center",
+        }
+    }
+
+
+def build_xyz_ctrl_request(sequence_id: str, axis: str, direction: int, mode: int) -> dict[str, Any]:
+    axis = str(axis or "").upper()
+    if axis not in ("X", "Y", "Z"):
+        raise BambuLanError(f"Неподдерживаемая ось: {axis}")
+    return {
+        "print": {
+            "sequence_id": str(sequence_id),
+            "command": "xyz_ctrl",
+            "axis": axis,
+            "dir": 1 if int(direction) >= 0 else -1,
+            "mode": 1 if int(mode) else 0,
         }
     }
 
 
 def _config_file() -> Path:
     base = os.getenv("LOCALAPPDATA")
-    if base:
-        root = Path(base)
-    else:
-        root = Path.home() / ".sibir-cut"
+    root = Path(base) if base else Path.home() / ".sibir-cut"
     return root / "SibirCut" / "lan.json"
 
 
@@ -80,7 +106,7 @@ def save_lan_config(data: dict[str, Any]) -> None:
 
 
 class BambuLanClient:
-    """Small local-only Bambu MQTT client for status + explicit G-code commands."""
+    """Local Bambu MQTT client with Orca-compatible homing/axis control."""
 
     def __init__(
         self,
@@ -111,6 +137,7 @@ class BambuLanClient:
         self._seq = int(time.time() * 1000) % 1_000_000_000
         self._connect_event = threading.Event()
         self._on_update = on_update
+        self._position = {"x": None, "y": None, "z": None, "source": "unknown"}
 
         try:
             self._client = mqtt.Client(
@@ -205,6 +232,30 @@ class BambuLanClient:
             self._connected = False
         self._notify()
 
+    @staticmethod
+    def _extract_report_position(print_state: dict[str, Any]) -> dict[str, float] | None:
+        # Some firmware/network layers may expose position fields even though
+        # they are absent from the public push_status schema. Accept only an
+        # unambiguous XYZ triplet.
+        candidates = [print_state.get("position"), print_state.get("pos"), print_state.get("xyz")]
+        candidates.append(print_state)
+        for obj in candidates:
+            if not isinstance(obj, dict):
+                continue
+            vals = {}
+            for a in ("x", "y", "z"):
+                v = obj.get(a)
+                if isinstance(v, (int, float)):
+                    vals[a] = float(v)
+                elif isinstance(v, str):
+                    try:
+                        vals[a] = float(v)
+                    except Exception:
+                        pass
+            if len(vals) == 3:
+                return vals
+        return None
+
     def _handle_message(self, client, userdata, message) -> None:
         try:
             data = json.loads(message.payload.decode("utf-8", errors="replace"))
@@ -215,6 +266,11 @@ class BambuLanClient:
         with self._lock:
             _merge_dict(self._state, data)
             self._last_report_monotonic = time.monotonic()
+            p = data.get("print") if isinstance(data.get("print"), dict) else {}
+            reported = self._extract_report_position(p)
+            if reported:
+                self._position.update(reported)
+                self._position["source"] = "printer"
         self._notify()
 
     def _publish(self, payload: dict[str, Any]) -> None:
@@ -247,9 +303,28 @@ class BambuLanClient:
         with self._lock:
             return copy.deepcopy(self._state)
 
+    def position_snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return copy.deepcopy(self._position)
+
+    def set_known_position(self, x=None, y=None, z=None, source: str = "command") -> None:
+        with self._lock:
+            if x is not None:
+                self._position["x"] = float(x)
+            if y is not None:
+                self._position["y"] = float(y)
+            if z is not None:
+                self._position["z"] = float(z)
+            self._position["source"] = str(source)
+
+    def invalidate_position(self) -> None:
+        with self._lock:
+            self._position = {"x": None, "y": None, "z": None, "source": "unknown"}
+
     def status_summary(self) -> dict[str, Any]:
         snap = self.snapshot()
         p = snap.get("print") if isinstance(snap.get("print"), dict) else {}
+        fun = p.get("fun")
         with self._lock:
             age = None if not self._last_report_monotonic else max(0.0, time.monotonic() - self._last_report_monotonic)
         return {
@@ -260,8 +335,82 @@ class BambuLanClient:
             "bed_temp": p.get("bed_temper"),
             "bed_target": p.get("bed_target_temper"),
             "wifi_signal": p.get("wifi_signal"),
+            "home_flag": p.get("home_flag"),
+            "fun": fun,
+            "supports_mqtt_homing": _hex_flag(fun, 32),
+            "supports_mqtt_axis_ctrl": _hex_flag(fun, 38),
             "report_age": age,
         }
+
+    def go_home(self, printing: bool = False) -> str:
+        st = self.status_summary()
+        self.invalidate_position()
+        if st.get("supports_mqtt_homing"):
+            self._publish(build_home_request(self._sequence()))
+            return "back_to_center"
+        # Orca fallback: only X while printing; full G28 while idle.
+        self.send_gcode("G28 X" if printing else "G28")
+        return "G28 X" if printing else "G28"
+
+    def jog_axis_orca(self, axis: str, input_val: float, speed: int = 3000, core_xy: bool = False) -> str:
+        """Use the same control strategy as OrcaSlicer.
+
+        Native xyz_ctrl supports Orca's 1/10 mm style jogs. Fine sub-mm moves
+        use Orca's protected relative-G-code fallback with higher precision.
+        """
+        axis = str(axis or "").upper()
+        if axis not in ("X", "Y", "Z"):
+            raise BambuLanError(f"Неподдерживаемая ось: {axis}")
+        value = float(input_val)
+        st = self.status_summary()
+
+        # Current Orca uses mqtt xyz_ctrl when supported. Its protocol exposes
+        # two movement modes (small / 10 mm), so keep sub-mm calibration on G-code.
+        use_native = st.get("supports_mqtt_axis_ctrl") and abs(value) in (1.0, 10.0)
+        if use_native:
+            direction = 1 if value > 0 else -1
+            if not core_xy and axis in ("Y", "Z"):
+                direction = -direction
+            mode = 1 if abs(value) >= 10.0 else 0
+            self._publish(build_xyz_ctrl_request(self._sequence(), axis, direction, mode))
+            method = "xyz_ctrl"
+        else:
+            physical_value = value
+            if not core_xy and axis in ("Y", "Z"):
+                physical_value = -physical_value
+            gcode = (
+                "M211 S\n"
+                "M211 X1 Y1 Z1\n"
+                "M1002 push_ref_mode\n"
+                "G91\n"
+                f"G1 {axis}{physical_value:.3f} F{int(speed)}\n"
+                "M1002 pop_ref_mode\n"
+                "M211 R"
+            )
+            self.send_gcode(gcode)
+            method = "orca_gcode"
+
+        with self._lock:
+            key = axis.lower()
+            cur = self._position.get(key)
+            if isinstance(cur, (int, float)):
+                # UI coordinate follows requested logical movement direction.
+                self._position[key] = float(cur) + value
+                self._position["source"] = "tracked"
+        return method
+
+    def move_absolute(self, x=None, y=None, z=None, feed: int = 1200) -> None:
+        words = []
+        if x is not None:
+            words.append(f"X{float(x):.3f}")
+        if y is not None:
+            words.append(f"Y{float(y):.3f}")
+        if z is not None:
+            words.append(f"Z{float(z):.3f}")
+        if not words:
+            return
+        self.send_gcode("G90\nG1 " + " ".join(words) + f" F{int(feed)}\nM400")
+        self.set_known_position(x=x, y=y, z=z, source="command")
 
 
 def lan_self_test() -> None:
@@ -269,9 +418,22 @@ def lan_self_test() -> None:
     _merge_dict(dst, {"print": {"bed_temper": 24.0}})
     if dst["print"].get("gcode_state") != "IDLE" or dst["print"].get("bed_temper") != 24.0:
         raise RuntimeError("LAN partial report merge failed")
+
     req = build_gcode_request("42", "G90\nG1 Z5 F600")
     if req.get("print", {}).get("command") != "gcode_line" or "G1 Z5" not in req["print"].get("param", ""):
         raise RuntimeError("LAN gcode_line payload failed")
+
     push = build_pushall_request("43")
     if push.get("pushing", {}).get("command") != "pushall":
         raise RuntimeError("LAN pushall payload failed")
+
+    home = build_home_request("44")
+    if home.get("print", {}).get("command") != "back_to_center":
+        raise RuntimeError("LAN back_to_center payload failed")
+
+    axis = build_xyz_ctrl_request("45", "Z", -1, 1)
+    if axis.get("print", {}).get("command") != "xyz_ctrl" or axis["print"].get("axis") != "Z":
+        raise RuntimeError("LAN xyz_ctrl payload failed")
+
+    if not _hex_flag(hex((1 << 32) | (1 << 38)), 32) or not _hex_flag(hex((1 << 32) | (1 << 38)), 38):
+        raise RuntimeError("LAN Orca fun-bit parser failed")
