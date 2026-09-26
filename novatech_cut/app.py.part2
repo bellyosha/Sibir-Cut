@@ -42,10 +42,10 @@
     def select_material(self):
         name=self.material_var.get();m=next((x for x in DEFAULT_MATERIALS if x.name==name),None)
         if m:
-            self.project.material=MaterialProfile.from_dict(m.to_dict());self._air_test_exported=False;self.refresh_all()
+            self.project.material=MaterialProfile.from_dict(m.to_dict());self.refresh_all()
     def apply_job_settings(self):
         try:
-            self.sync_material();self._air_test_exported=False;self.refresh_all()
+            self.sync_material();self.refresh_all()
         except Exception as exc:
             messagebox.showerror('Параметры',str(exc),parent=self)
     def on_mode_changed(self):
@@ -156,9 +156,9 @@
                 self.warn.config(text='',foreground='#b45309')
         except Exception as e:self.status.config(text=str(e));self.warn.config(text='')
     def save_project(self):
-        self.sync_material();f=self.current_file or filedialog.asksaveasfilename(defaultextension='.ncut',filetypes=[('Novatech Cut project','*.ncut')]);
+        self.sync_material();f=self.current_file or filedialog.asksaveasfilename(defaultextension='.ncut',filetypes=[('Сибирь Cut project','*.ncut')]);
         if f:save_project(self.project,f);self.current_file=f
     def open_project(self):
-        f=filedialog.askopenfilename(filetypes=[('Novatech Cut project','*.ncut')]);
+        f=filedialog.askopenfilename(filetypes=[('Сибирь Cut project','*.ncut')]);
         if f:
             try:self.project=load_project(f);self.current_file=f;self.refresh_all()
