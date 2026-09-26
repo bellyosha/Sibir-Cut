@@ -14,3 +14,4 @@ Bambu Studio source/configuration was consulted to verify the pause command `M40
 - OpenCV / opencv-python — Apache-2.0 plus third-party notices
 - Pillow — HPND
 - PyInstaller — GPL-2.0-or-later with bootloader exception
+- Eclipse Paho MQTT Python (paho-mqtt) — EPL-2.0 / EDL-1.0
