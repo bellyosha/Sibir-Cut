@@ -26,7 +26,6 @@
                 p.work_z=contact_z;p.safe_z=safe_z;p.z_calibration_version=2;p.calibrated=True
                 if self.project.material.mode!='Рисование':self.project.material.work_z=p.work_z
                 self.project.material.safe_z=p.safe_z
-                self._air_test_exported=False
                 w.destroy();self.refresh_all()
             except Exception as exc:
                 messagebox.showerror('Калибровка',str(exc),parent=w)
@@ -57,7 +56,7 @@
         txt=tk.Text(body,wrap='word',font=('Segoe UI',10),height=8)
         sb=ttk.Scrollbar(body,orient='vertical',command=txt.yview);txt.configure(yscrollcommand=sb.set)
         txt.grid(row=0,column=0,sticky='nsew');sb.grid(row=0,column=1,sticky='ns')
-        txt.insert('1.0','''Мастер калибровки Novatech Cut
+        txt.insert('1.0','''Мастер калибровки Сибирь Cut
 
 1. Снимите UMTS. Любой homing выполняется только без режущего модуля.
 2. Выполните штатный homing на принтере.
@@ -81,7 +80,7 @@ Esc — отмена
 
         w.bind('<Escape>',lambda e:w.destroy())
         w.bind('<Control-Return>',lambda e:apply())
-    def export(self,air=False,show_message=True):
+    def export(self,show_message=True):
         try:
             self.sync_material();paths=prepare_paths(self.project.objects,self.project.material)
             if not paths:raise GCodeError('Нет траекторий для экспорта')
@@ -94,19 +93,18 @@ Esc — отмена
                     parent=self
                 )
                 return None
-            g,stats=generate_gcode(paths,self.project.printer,self.project.material,air_test=air)
-            ext='.airtest.gcode' if air else '.gcode';f=filedialog.asksaveasfilename(defaultextension=ext,filetypes=[('A1 direct G-code','*.gcode')])
+            g,stats=generate_gcode(paths,self.project.printer,self.project.material,air_test=False)
+            f=filedialog.asksaveasfilename(defaultextension='.gcode',filetypes=[('A1 direct G-code','*.gcode')])
             if not f:return None
             orca_preview=None;raw_gcode=f
             Path(f).write_text(g,encoding='utf-8')
             root=str(Path(f).with_suffix(''))
             orca_preview=root+'_ORCA_PREVIEW.3mf'
             build_orca_preview_3mf(orca_preview,paths)
-            report=Path(f+'.report.json');report.write_text(json.dumps({'air_test':air,'material':self.project.material.to_dict(),'printer':self.project.printer.to_dict(),'cut_length_mm':stats.cut_length_mm,'travel_length_mm':stats.travel_length_mm,'estimated_seconds':stats.estimated_seconds,'bounds':stats.bounds,'passes':stats.passes,'orca_preview':orca_preview,'raw_gcode':raw_gcode},ensure_ascii=False,indent=2),encoding='utf-8')
+            report=Path(f+'.report.json');report.write_text(json.dumps({'material':self.project.material.to_dict(),'printer':self.project.printer.to_dict(),'cut_length_mm':stats.cut_length_mm,'travel_length_mm':stats.travel_length_mm,'estimated_seconds':stats.estimated_seconds,'bounds':stats.bounds,'passes':stats.passes,'orca_preview':orca_preview,'raw_gcode':raw_gcode},ensure_ascii=False,indent=2),encoding='utf-8')
             self.last_export_path=f
-            if air:self._air_test_exported=True
             if show_message:
-                kind='воздушный тест' if air else 'задание'
+                kind='задание'
                 extra=''
                 if orca_preview:
                     extra=f'\n\nДля A1: {f}\nДля просмотра формы в Orca: {orca_preview}'
