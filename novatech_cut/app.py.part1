@@ -9,14 +9,14 @@ from .gcode import generate_gcode, GCodeError, analyze_path_bounds
 from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
 
-APP_TITLE='Novatech Cut 0.2.10'
+APP_TITLE='Сибирь Cut 0.2.11'
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__(); self.title(APP_TITLE); self.geometry('1400x850'); self.minsize(1050,680)
         self.project=Project();self.current_file=None;self.zoom=2.2;self.origin=(28,28);self.history=[];self.future=[]
         self.prepared_paths=[];self.prepare_error=None;self._busy=False;self._busy_win=None
-        self._drag=None;self._drag_active=False;self._air_test_exported=False;self.last_export_path=None
+        self._drag=None;self._drag_active=False;self.last_export_path=None
         self._style();self._build();self.refresh_all()
     def _style(self):
         s=ttk.Style(self); 
@@ -57,8 +57,7 @@ class App(tk.Tk):
         ttk.Label(right,text='⚠ Для рисования Z калибровки — это ПЕРВОЕ касание без нажима. Прижим ручки задаётся отдельно и ограничен 0…0,5 мм.',foreground='#b45309',wraplength=300).pack(fill='x',pady=8)
         self.calib_label=ttk.Label(right,text='');self.calib_label.pack(fill='x',pady=5)
         ttk.Button(right,text='Мастер подготовки и запуска',style='Danger.TButton',command=self.launch_wizard).pack(fill='x',pady=6)
-        ttk.Button(right,text='Воздушный тест (быстрый экспорт)',command=lambda:self.export(air=True)).pack(fill='x',pady=3)
-        ttk.Button(right,text='Экспортировать задание',command=lambda:self.export(air=False)).pack(fill='x',pady=3)
+        ttk.Button(right,text='Экспортировать задание',command=self.export).pack(fill='x',pady=3)
         bottom=ttk.Frame(self,padding=(10,4));bottom.pack(fill='x');self.status=ttk.Label(bottom,text='');self.status.pack(side='left');self.warn=ttk.Label(bottom,text='',foreground='#b45309');self.warn.pack(side='right')
     def current_index(self):
         s=self.listbox.curselection();return s[0] if s else None
@@ -68,7 +67,7 @@ class App(tk.Tk):
         o=self.project.objects[i]
         for k in ('x','y','scale','rotation'):self.vars[k].set(getattr(o,'rotation_deg' if k=='rotation' else k))
     def checkpoint(self):
-        self.history.append(copy.deepcopy(self.project));self.history=self.history[-50:];self.future.clear();self._air_test_exported=False
+        self.history.append(copy.deepcopy(self.project));self.history=self.history[-50:];self.future.clear()
     def undo(self):
         if not self.history:return
         self.future.append(copy.deepcopy(self.project));self.project=self.history.pop();self.refresh_all()
@@ -112,7 +111,7 @@ class App(tk.Tk):
         if i is not None:self.checkpoint();self.project.objects.pop(i);self.refresh_all()
     def _run_background(self, title, fn, on_success):
         if self._busy:
-            messagebox.showinfo('Novatech Cut','Сейчас уже выполняется обработка. Дождитесь её завершения.',parent=self)
+            messagebox.showinfo('Сибирь Cut','Сейчас уже выполняется обработка. Дождитесь её завершения.',parent=self)
             return
         self._busy=True
         w=tk.Toplevel(self);self._busy_win=w;w.title(title);w.geometry('430x130');w.transient(self);w.resizable(False,False)
