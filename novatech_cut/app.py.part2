@@ -1,3 +1,4 @@
+            center=messagebox.askyesno('Тип изображения','Это тонкий линейный рисунок, где нужна ОДНА линия по середине штриха?\n\nДа — построить осевые линии.\nНет — считать чёрное заполненной фигурой (правильно для резки и закрашивания).',parent=self,default='no')
             opts={'threshold':th,'external_only':False,'smoothing':sm,'invert':inv,'centerline':center}
 
         def imported(paths):
@@ -161,5 +162,3 @@
         f=filedialog.askopenfilename(filetypes=[('Novatech Cut project','*.ncut')]);
         if f:
             try:self.project=load_project(f);self.current_file=f;self.refresh_all()
-            except Exception as e:messagebox.showerror('Проект',str(e))
-    def printer_profile(self):
