@@ -54,8 +54,8 @@
             try:
                 if old.winfo_exists():old.lift();return
             except Exception:pass
-        w=tk.Toplevel(self);self._wizard=w;w.title('Мастер подготовки и запуска — Novatech Cut');w.geometry('780x650');w.minsize(700,560);w.transient(self)
-        step={'i':0};titles=['Файл','Размещение','Режим и материал','Калибровка A1 + UMTS','Воздушный тест','Экспорт и запуск']
+        w=tk.Toplevel(self);self._wizard=w;w.title('Мастер подготовки и запуска — Сибирь Cut');w.geometry('780x650');w.minsize(700,560);w.transient(self)
+        step={'i':0};titles=['Файл','Размещение','Режим и материал','Калибровка A1 + UMTS','Экспорт и запуск']
         top=ttk.Frame(w,padding=12);top.pack(fill='x');step_label=ttk.Label(top,text='',style='Title.TLabel');step_label.pack(anchor='w');desc=ttk.Label(top,text='',wraplength=730);desc.pack(anchor='w',pady=(4,0))
         body=ttk.Frame(w,padding=(16,8));body.pack(fill='both',expand=True)
         nav=ttk.Frame(w,padding=12);nav.pack(fill='x');back=ttk.Button(nav,text='← Назад');back.pack(side='left');nextb=ttk.Button(nav,text='Далее →');nextb.pack(side='right');ttk.Button(nav,text='Закрыть',command=w.destroy).pack(side='right',padx=8)
@@ -79,7 +79,7 @@
             prof=next((x for x in DEFAULT_MATERIALS if x.name==wmat.get()),None)
             if prof:self.project.material=MaterialProfile.from_dict(prof.to_dict())
             mm=self.project.material;mm.name=wmat.get();mm.mode=wm.get();mm.passes=max(1,wpasses.get());mm.work_speed=max(0.1,wspeed.get());mm.blade_offset=max(0,wblade.get());mm.overcut=max(0,wover.get());mm.drawing_style=wstyle.get();mm.fill_spacing=max(0.1,wspacing.get());mm.fill_angle=wangle.get();mm.fill_crosshatch=bool(wcross.get());mm.fill_inset=max(0,winset.get());mm.drawing_press_depth=max(0,wpress.get());mm.drawing_lift_height=max(0,wlift.get())
-            self._air_test_exported=False;self.refresh_all()
+            self.refresh_all()
         def center_selected():
             if not self.project.objects:return
             if self.current_index() is None:self.listbox.selection_set(0);self.listbox.activate(0)
@@ -129,22 +129,12 @@
                 else:note('Профиль ещё не откалиброван. Реальный экспорт заблокирован.','bad')
                 note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Z первого касания — ручка только начинает касаться материала, БЕЗ нажима.\n• Минимальная безопасная Z — инструмент гарантированно не касается материала.\n• Для рисования фактический прижим и подъём задаются отдельно в параметрах задания.\n\nПеред КАЖДЫМ запуском задания сначала выполните штатный Home на экране A1 при СНЯТОМ UMTS. Сам файл больше не вызывает G28, чтобы не запускать лишний сервисный цикл. Значения Z нельзя угадывать.')
                 ttk.Button(body,text='Открыть мастер калибровки',command=self.calibrate).pack(anchor='w',pady=8);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
-            elif i==4:
-                desc.config(text='Сначала проверяем траекторию без касания материала. Это обязательный этап перед первым реальным запуском.')
-                if self._air_test_exported:note('✓ Воздушный тест для текущего задания сохранён.','ok')
-                else:note('Воздушный тест ещё не сохранён.','warn')
-                note('1. UMTS снят.\n2. На экране A1 ВРУЧНУЮ выполните Home.\n3. После завершения Home запустите воздушный файл.\n4. Файл сразу отключит нагрев сопла/стола и переместит головку к переднему краю стола (по умолчанию X230 Y10).\n5. Головка ОСТАНЕТСЯ в X230 Y10 на время ожидания установки UMTS (по умолчанию 10 секунд). Это не системная пауза Bambu — M400 U1 больше не используется, потому что он сам уводит головку к очистке сопла.\n6. Установите UMTS во время этого ожидания. После таймера задание продолжится автоматически.\n7. Убедитесь, что инструмент нигде не касается стола и вся траектория остаётся в нужной зоне.')
-                def air():
-                    if self.export(air=True,show_message=False):messagebox.showinfo('Воздушный тест','Файл сохранён. Перенесите его на принтер и проверьте движение без касания материала.',parent=w);render()
-                ttk.Button(body,text='Сохранить файл воздушного теста…',command=air).pack(anchor='w',pady=8)
             else:
-                desc.config(text='После успешного воздушного теста создаётся прямой .gcode для A1. Его нельзя заново нарезать в Orca.')
-                note('Novatech Cut создаёт прямой .gcode без штатного стартового кода Bambu. Скопируйте его на microSD и запускайте с экрана A1. Orca для запуска рабочего файла не используется.')
+                desc.config(text='Создаётся прямой .gcode для A1. Его нельзя заново нарезать в Orca.')
+                note('Сибирь Cut создаёт прямой .gcode без штатного стартового кода Bambu. Скопируйте его на microSD и запускайте с экрана A1. Orca для запуска рабочего файла не используется.')
                 note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.\n2. Скопируйте его на microSD и вставьте карту в A1.\n3. UMTS СНЯТ. На экране A1 вручную выполните Home.\n4. Только после завершения Home запустите файл.\n5. Файл принудительно задаёт M104 S0 / M140 S0, затем головка идёт к переднему краю X230 Y10.\n6. В X230 Y10 выполняется фиксированное ожидание установки UMTS. Головка НЕ должна уезжать к очистке сопла.\n7. Выполнится резка/рисование без нагрева и экструзии.\n8. В конце головка снова идёт к X230 Y10 и остаётся там на время ожидания снятия UMTS.','warn')
                 def final_export():
-                    if not self._air_test_exported:
-                        if not messagebox.askyesno('Воздушный тест','Для текущего задания не отмечен сохранённый воздушный тест. Всё равно перейти к экспорту?',parent=w):return
-                    if self.export(air=False,show_message=False):messagebox.showinfo('Рабочий файл','Прямой .gcode создан. Скопируйте его на microSD и запускайте с экрана A1, без Orca.',parent=w);render()
+                    if self.export(show_message=False):messagebox.showinfo('Рабочий файл','Прямой .gcode создан. Скопируйте его на microSD и запускайте с экрана A1, без Orca.',parent=w);render()
                 ttk.Button(body,text='Экспортировать прямой .gcode для A1…',style='Danger.TButton',command=final_export).pack(anchor='w',pady=8)
                 ttk.Button(body,text='Открыть папку последнего экспорта',command=open_export_folder).pack(anchor='w')
         def go(delta):
@@ -158,7 +148,6 @@
                     try:apply_settings()
                     except Exception as exc:messagebox.showerror('Параметры',str(exc),parent=w);return
                 if i==3 and not self.project.printer.calibrated:messagebox.showwarning('Калибровка','Сначала завершите калибровку профиля A1 + UMTS.',parent=w);return
-                if i==4 and not self._air_test_exported:messagebox.showwarning('Воздушный тест','Сначала сохраните и проверьте воздушный тест.',parent=w);return
                 if i==len(titles)-1:w.destroy();return
             step['i']=max(0,min(len(titles)-1,i+delta));render()
         back.config(command=lambda:go(-1));nextb.config(command=lambda:go(1))
