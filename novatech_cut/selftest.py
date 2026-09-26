@@ -205,7 +205,18 @@ def _direct_gcode_regression_test() -> None:
     u=gcode.upper()
     if 'M109 ' in u or 'G1 E' in u or 'G28' in u:
         raise RuntimeError('Direct A1 G-code contains a standard print startup command')
-    if 'G1 X230 Y10' not in u and 'G1 X230.0 Y10.0' not in u:
+    park_ok=False
+    for line in gcode.splitlines():
+        code=line.split(';',1)[0].strip().upper()
+        if not code.startswith(('G0 ','G1 ')): continue
+        vals={}
+        for token in code.split()[1:]:
+            if token[:1] in ('X','Y'):
+                try: vals[token[0]]=float(token[1:])
+                except ValueError: pass
+        if abs(vals.get('X',-999)-230.0)<1e-3 and abs(vals.get('Y',-999)-10.0)<1e-3:
+            park_ok=True
+    if not park_ok:
         raise RuntimeError('Direct A1 G-code does not park away from the nozzle-wiper area')
 
 def run_self_test() -> None:
