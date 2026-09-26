@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .geometry import path_length, load_raster, _morphological_skeleton, hatch_fill_paths
 from .gcode import generate_gcode, validate_gcode, analyze_path_bounds, GCodeError
-from .models import Project, SceneObject
+from .models import Project, SceneObject, PrinterProfile
 from .pack3mf import build_gcode_3mf, inspect_gcode_3mf, build_orca_preview_3mf, inspect_orca_preview_3mf
 from .pipeline import prepare_paths, import_paths, detect_import_kind
 
@@ -210,6 +210,8 @@ def _direct_gcode_regression_test() -> None:
         raise RuntimeError('Direct A1 G-code contains firmware pause that relocates the toolhead')
     if u.count('M400 S')<2:
         raise RuntimeError('Direct A1 G-code must hold in place for install and removal')
+    if u.count('M400 S10')<2:
+        raise RuntimeError('Default UMTS install/remove holds must be 10 seconds')
     park_ok=False
     for line in gcode.splitlines():
         code=line.split(';',1)[0].strip().upper()
@@ -224,7 +226,24 @@ def _direct_gcode_regression_test() -> None:
     if not park_ok:
         raise RuntimeError('Direct A1 G-code does not park away from the nozzle-wiper area')
 
+def _service_wait_migration_test() -> None:
+    old=PrinterProfile().to_dict()
+    old['service_wait_version']=2
+    old['install_wait_seconds']=300.0
+    old['remove_wait_seconds']=180.0
+    migrated=PrinterProfile.from_dict(old)
+    if migrated.install_wait_seconds != 10.0 or migrated.remove_wait_seconds != 10.0:
+        raise RuntimeError('0.2.9 default UMTS waits were not migrated to 10 seconds')
+    custom=PrinterProfile().to_dict()
+    custom['service_wait_version']=2
+    custom['install_wait_seconds']=45.0
+    custom['remove_wait_seconds']=20.0
+    migrated_custom=PrinterProfile.from_dict(custom)
+    if migrated_custom.install_wait_seconds != 45.0 or migrated_custom.remove_wait_seconds != 20.0:
+        raise RuntimeError('User-custom service waits must be preserved during migration')
+
 def run_self_test() -> None:
+    _service_wait_migration_test()
     project = Project()
     project.printer.calibrated = True
     square = [(20.0, 20.0), (40.0, 20.0), (40.0, 40.0), (20.0, 40.0), (20.0, 20.0)]
