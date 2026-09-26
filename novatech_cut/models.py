@@ -24,17 +24,22 @@ class PrinterProfile:
     park_x: float = 230.0
     park_y: float = 10.0
     manual_home_required: bool = True
+    # Bambu firmware M400 U1 always parks in its own pause/wiper location.
+    # UMTS therefore uses an in-place timed service hold at park_x/park_y.
+    service_wait_version: int = 2
+    install_wait_seconds: float = 300.0
+    remove_wait_seconds: float = 180.0
     max_work_speed: float = 120.0  # mm/s
     max_travel_speed: float = 200.0
     max_accel: float = 3000.0
     min_z: float = 0.0
     max_z: float = 256.0
     calibrated: bool = False
-    pause_gcode: str = "M400 U1"
+    pause_gcode: str = "M400 S{install_wait_seconds:.0f}"
     start_template: str = (
-        "; NOVATECH CUT UMTS START V2\n"
+        "; NOVATECH CUT UMTS START V3\n"
         "; IMPORTANT: HOME THE PRINTER MANUALLY WITH UMTS REMOVED BEFORE STARTING THIS JOB\n"
-        "; Keep heaters off. No purge, no extrusion, no automatic homing in the job.\n"
+        "; No firmware pause command is used: M400 U1 would move the head to the wiper area.\n"
         "M104 S0\n"
         "M140 S0\n"
         "G90\n"
@@ -42,8 +47,8 @@ class PrinterProfile:
         "; MOVE TO ACCESSIBLE FRONT EDGE FOR UMTS INSTALLATION\n"
         "G1 X{park_x:.3f} Y{park_y:.3f} F6000\n"
         "M400\n"
-        "; INSTALL UMTS, THEN RESUME\n"
-        "M400 U1\n"
+        "; INSTALL UMTS NOW - HEAD REMAINS HERE DURING THIS TIMED HOLD\n"
+        "M400 S{install_wait_seconds:.0f}\n"
         "G90\n"
         "G1 Z{safe_z:.3f} F600\n"
     )
@@ -51,8 +56,8 @@ class PrinterProfile:
         "G1 Z{safe_z:.3f} F600\n"
         "G1 X{park_x:.3f} Y{park_y:.3f} F6000\n"
         "M400\n"
-        "; REMOVE UMTS BEFORE ANY FUTURE HOMING\n"
-        "M400 U1\n"
+        "; REMOVE UMTS NOW - HEAD REMAINS HERE DURING THIS TIMED HOLD\n"
+        "M400 S{remove_wait_seconds:.0f}\n"
         "; END NOVATECH CUT JOB\n"
     )
 
@@ -72,6 +77,7 @@ class PrinterProfile:
     def from_dict(cls, d: Dict[str, Any]):
         data=dict(d or {})
         had_z_v2=('z_calibration_version' in data and int(data.get('z_calibration_version') or 0)>=2)
+        had_service_v2=('service_wait_version' in data and int(data.get('service_wait_version') or 0)>=2)
         obj=cls(**data)
         if not had_z_v2:
             # Previous builds stored work_z as an arbitrary pressed working Z.
@@ -101,6 +107,15 @@ class PrinterProfile:
         if obj.start_template == old_default_start:
             obj.start_template=defaults.start_template
             obj.manual_home_required=True
+        if not had_service_v2 or 'M400 U1' in obj.start_template or 'M400 U1' in obj.end_template:
+            # Firmware pause M400 U1 ignores our XY park and relocates the toolhead
+            # to Bambu's pause/wiper area. Migrate old profiles to an in-place timed hold.
+            obj.start_template=defaults.start_template
+            obj.end_template=defaults.end_template
+            obj.pause_gcode=defaults.pause_gcode
+            obj.service_wait_version=2
+            if float(getattr(obj,'install_wait_seconds',0) or 0)<30: obj.install_wait_seconds=300.0
+            if float(getattr(obj,'remove_wait_seconds',0) or 0)<30: obj.remove_wait_seconds=180.0
         if ((abs(obj.park_x-20.0)<1e-9 and abs(obj.park_y-240.0)<1e-9)
                 or (abs(obj.park_x-128.0)<1e-9 and abs(obj.park_y-10.0)<1e-9)):
             obj.park_x=230.0
