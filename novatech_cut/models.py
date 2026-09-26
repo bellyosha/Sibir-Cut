@@ -21,7 +21,7 @@ class PrinterProfile:
     # Z calibration v2: work_z means FIRST CONTACT, not drawing pressure.
     z_calibration_version: int = 2
     # Accessible front-edge parking point used for installing/removing UMTS.
-    park_x: float = 128.0
+    park_x: float = 230.0
     park_y: float = 10.0
     manual_home_required: bool = True
     max_work_speed: float = 120.0  # mm/s
@@ -101,8 +101,9 @@ class PrinterProfile:
         if obj.start_template == old_default_start:
             obj.start_template=defaults.start_template
             obj.manual_home_required=True
-        if abs(obj.park_x-20.0)<1e-9 and abs(obj.park_y-240.0)<1e-9:
-            obj.park_x=128.0
+        if ((abs(obj.park_x-20.0)<1e-9 and abs(obj.park_y-240.0)<1e-9)
+                or (abs(obj.park_x-128.0)<1e-9 and abs(obj.park_y-10.0)<1e-9)):
+            obj.park_x=230.0
             obj.park_y=10.0
         return obj
 
