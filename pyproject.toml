@@ -1,6 +1,6 @@
 [project]
 name = "sibir-cut"
-version = "0.2.12"
+version = "0.2.13"
 description = "2D cutter/plotter CAM for Bambu Lab A1 + UMTS"
 requires-python = ">=3.12"
 license = {text = "GPL-3.0-or-later"}
