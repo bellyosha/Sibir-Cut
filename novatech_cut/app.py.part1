@@ -9,58 +9,188 @@ from .gcode import generate_gcode, GCodeError, analyze_path_bounds
 from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
 from .lan_gui import open_lan_control, upload_path_via_lan
+from .printer_manager import open_printer_manager, auto_connect_saved_printer
+from .calibration_wizard import open_calibration_wizard
+from .job_settings import open_job_settings
+from .modern_ui import RoundedButton, RoundedPanel
 
-APP_TITLE='Sibir Cut 0.2.17'
+APP_TITLE='Sibir Cut 0.3.0'
 
 class App(tk.Tk):
     def __init__(self):
-        super().__init__(); self.title(APP_TITLE); self.geometry('1400x850'); self.minsize(1050,680)
+        super().__init__(); self.title(APP_TITLE); self.geometry('1460x900'); self.minsize(1120,700);self.configure(bg='#eef2f5')
         self.project=Project();self.current_file=None;self.zoom=2.2;self.origin=(28,28);self.history=[];self.future=[]
         self.prepared_paths=[];self.prepare_error=None;self._busy=False;self._busy_win=None
-        self._drag=None;self._drag_active=False;self.last_export_path=None;self._lan_window=None;self._lan_client=None
-        self._style();self._build();self.refresh_all()
+        self._drag=None;self._drag_active=False;self.last_export_path=None
+        self._lan_window=None;self._lan_client=None;self._printer_manager_window=None;self._calibration_wizard_window=None;self._job_settings_window=None
+        self._printer_status_kind='idle';self._printer_status_value='Принтер не подключен'
+        self._style();self._build();self.refresh_all();self.protocol('WM_DELETE_WINDOW',self._close_app)
+        self.after(450,lambda:auto_connect_saved_printer(self));self.after(1200,self._poll_printer_status)
     def _style(self):
-        s=ttk.Style(self); 
+        s=ttk.Style(self)
         try:s.theme_use('clam')
         except:pass
-        s.configure('TButton',padding=6);s.configure('Danger.TButton',padding=9,font=('Segoe UI',10,'bold'))
+        s.configure('.',font=('Segoe UI',10))
+        s.configure('TButton',padding=(10,7),font=('Segoe UI',10))
+        s.configure('Accent.TButton',padding=(11,8),font=('Segoe UI',10,'bold'),foreground='white',background='#0f766e')
+        s.map('Accent.TButton',background=[('active','#115e59'),('pressed','#134e4a')])
+        s.configure('Danger.TButton',padding=(11,8),font=('Segoe UI',10,'bold'),foreground='white',background='#dc2626')
         s.configure('Title.TLabel',font=('Segoe UI',12,'bold'))
+        s.configure('Hero.TLabel',font=('Segoe UI',20,'bold'),foreground='#0f172a')
+        s.configure('Step.TLabel',font=('Segoe UI',16,'bold'),foreground='#0f172a')
+        s.configure('Muted.TLabel',font=('Segoe UI',10),foreground='#64748b')
+        s.configure('Card.TFrame',background='#ffffff')
+        s.configure('Card.TLabel',background='#ffffff',foreground='#0f172a')
+        s.configure('TLabelframe',padding=6)
+        s.configure('TLabelframe.Label',font=('Segoe UI',10,'bold'))
+
     def _build(self):
-        top=ttk.Frame(self,padding=8);top.pack(fill='x')
-        for text,cmd in [('Импорт',self.do_import),('Открыть проект',self.open_project),('Сохранить',self.save_project),('Отмена',self.undo),('Повтор',self.redo),('Профиль принтера',self.printer_profile),('LAN управление',lambda:open_lan_control(self)),('Калибровка',self.calibrate),('Анимация',self.animate_preview),('Мастер запуска',self.launch_wizard)]:
-            ttk.Button(top,text=text,command=cmd).pack(side='left',padx=3)
-        ttk.Button(top,text='−',width=3,command=lambda:self.set_zoom(self.zoom/1.2)).pack(side='right');ttk.Button(top,text='+',width=3,command=lambda:self.set_zoom(self.zoom*1.2)).pack(side='right')
-        main=ttk.Panedwindow(self,orient='horizontal');main.pack(fill='both',expand=True,padx=8,pady=(0,8))
-        left=ttk.Frame(main,padding=8);center=ttk.Frame(main,padding=4);right=ttk.Frame(main,padding=8);main.add(left,weight=1);main.add(center,weight=4);main.add(right,weight=2)
-        ttk.Label(left,text='Объекты',style='Title.TLabel').pack(anchor='w');self.listbox=tk.Listbox(left,exportselection=False);self.listbox.pack(fill='both',expand=True,pady=6);self.listbox.bind('<<ListboxSelect>>',lambda e:self.load_obj_fields())
-        tf=ttk.LabelFrame(left,text='Трансформация',padding=6);tf.pack(fill='x')
+        # ----- header -------------------------------------------------------
+        header=tk.Frame(self,bg='#ffffff',height=72,highlightthickness=0);header.pack(fill='x');header.pack_propagate(False)
+        brand=tk.Frame(header,bg='#ffffff');brand.pack(side='left',padx=(18,20),pady=10)
+        mark=tk.Canvas(brand,width=42,height=42,bg='#ffffff',highlightthickness=0)
+        mark.pack(side='left')
+        mark.create_oval(3,3,39,39,fill='#0f766e',outline='')
+        mark.create_line(12,28,19,15,27,28,33,14,fill='white',width=4,smooth=True)
+        mark.create_polygon(28,28,36,30,31,22,fill='#f97316',outline='')
+        tk.Label(brand,text='SIBIR CUT',bg='#ffffff',fg='#0f172a',font=('Segoe UI',17,'bold')).pack(side='left',padx=(9,0))
+        tk.Label(brand,text='2D cutter for Bambu A1',bg='#ffffff',fg='#64748b',font=('Segoe UI',9)).pack(side='left',padx=(8,0),pady=(6,0))
+
+        tools=tk.Frame(header,bg='#ffffff');tools.pack(side='left',fill='y',pady=13)
+        for text,cmd in [('Импорт',self.do_import),('Открыть',self.open_project),('Сохранить',self.save_project),('↶',self.undo),('↷',self.redo)]:
+            b=tk.Button(tools,text=text,command=cmd,relief='flat',bd=0,bg='#f8fafc',fg='#334155',activebackground='#e2e8f0',font=('Segoe UI',10,'bold' if text in ('Импорт','Открыть','Сохранить') else 'normal'),padx=12,pady=7,cursor='hand2')
+            b.pack(side='left',padx=3)
+
+        hright=tk.Frame(header,bg='#ffffff');hright.pack(side='right',padx=18,pady=12)
+        self.printer_chip=RoundedButton(hright,'Принтер не подключен',lambda:open_printer_manager(self),width=250,height=42,radius=14,bg='#e2e8f0',fg='#475569',hover='#cbd5e1',parent_bg='#ffffff',font=('Segoe UI',9,'bold'))
+        self.printer_chip.pack(side='right',padx=(8,0))
+        RoundedButton(hright,'Калибровка',lambda:open_calibration_wizard(self),width=125,height=42,radius=14,bg='#0f172a',fg='white',hover='#1e293b',parent_bg='#ffffff').pack(side='right')
+
+        # ----- main work area ----------------------------------------------
+        work=tk.Frame(self,bg='#eef2f5');work.pack(fill='both',expand=True,padx=14,pady=14)
+
+        left=RoundedPanel(work,width=255,radius=18,fill='#ffffff',outline='#dde3e9',pad=14,parent_bg='#eef2f5')
+        left.pack(side='left',fill='y');left.pack_propagate(False)
+        li=left.inner
+        tk.Label(li,text='Объекты',bg='#ffffff',fg='#0f172a',font=('Segoe UI',13,'bold')).pack(anchor='w')
+        tk.Label(li,text='Импортированные контуры',bg='#ffffff',fg='#94a3b8',font=('Segoe UI',9)).pack(anchor='w',pady=(0,8))
+        self.listbox=tk.Listbox(li,exportselection=False,relief='flat',bd=0,highlightthickness=1,highlightbackground='#e2e8f0',selectbackground='#ccfbf1',selectforeground='#134e4a',font=('Segoe UI',10))
+        self.listbox.pack(fill='both',expand=True,pady=(0,12));self.listbox.bind('<<ListboxSelect>>',lambda e:self.load_obj_fields())
+
+        tk.Label(li,text='Положение',bg='#ffffff',fg='#0f172a',font=('Segoe UI',11,'bold')).pack(anchor='w',pady=(2,6))
         self.vars={k:tk.DoubleVar() for k in ('x','y','scale','rotation')};self.vars['scale'].set(1)
-        for k,label in [('x','X, мм'),('y','Y, мм'),('scale','Масштаб'),('rotation','Поворот, °')]:
-            row=ttk.Frame(tf);row.pack(fill='x');ttk.Label(row,text=label,width=12).pack(side='left');ttk.Entry(row,textvariable=self.vars[k],width=10).pack(side='right')
-        ttk.Button(tf,text='Применить',command=self.apply_transform).pack(fill='x',pady=4)
-        rr=ttk.Frame(tf);rr.pack(fill='x');ttk.Button(rr,text='Зеркало X',command=lambda:self.mirror('x')).pack(side='left',expand=True,fill='x');ttk.Button(rr,text='Зеркало Y',command=lambda:self.mirror('y')).pack(side='left',expand=True,fill='x')
-        ar=ttk.Frame(tf);ar.pack(fill='x',pady=(4,0));ttk.Button(ar,text='По центру',command=lambda:self.align('center')).pack(side='left',expand=True,fill='x');ttk.Button(ar,text='К левому',command=lambda:self.align('left')).pack(side='left',expand=True,fill='x')
-        ar2=ttk.Frame(tf);ar2.pack(fill='x');ttk.Button(ar2,text='Дублировать…',command=self.duplicate_many).pack(side='left',expand=True,fill='x');ttk.Button(ar2,text='Удалить',command=self.delete).pack(side='left',expand=True,fill='x')
-        self.canvas=tk.Canvas(center,bg='#f2f4f7',highlightthickness=0);self.canvas.pack(fill='both',expand=True);self.canvas.bind('<Configure>',lambda e:self.draw());self.canvas.bind('<MouseWheel>',self.on_wheel);self.canvas.bind('<Button-1>',self.on_canvas_press);self.canvas.bind('<B1-Motion>',self.on_canvas_drag);self.canvas.bind('<ButtonRelease-1>',self.on_canvas_release)
-        ttk.Label(right,text='Параметры задания',style='Title.TLabel').pack(anchor='w')
-        self.material_var=tk.StringVar(value=self.project.material.name);cb=ttk.Combobox(right,textvariable=self.material_var,values=[m.name for m in DEFAULT_MATERIALS],state='readonly');cb.pack(fill='x',pady=5);cb.bind('<<ComboboxSelected>>',lambda e:self.select_material())
+        grid=tk.Frame(li,bg='#ffffff');grid.pack(fill='x')
+        for row,(k,label) in enumerate([('x','X, мм'),('y','Y, мм'),('scale','Масштаб'),('rotation','Поворот, °')]):
+            tk.Label(grid,text=label,bg='#ffffff',fg='#475569',font=('Segoe UI',9)).grid(row=row,column=0,sticky='w',pady=3)
+            ttk.Entry(grid,textvariable=self.vars[k],width=12).grid(row=row,column=1,sticky='e',pady=3)
+        grid.columnconfigure(0,weight=1)
+        ttk.Button(li,text='Применить',command=self.apply_transform).pack(fill='x',pady=(7,4))
+        row=tk.Frame(li,bg='#ffffff');row.pack(fill='x')
+        ttk.Button(row,text='Зеркало X',command=lambda:self.mirror('x')).pack(side='left',expand=True,fill='x',padx=(0,2))
+        ttk.Button(row,text='Зеркало Y',command=lambda:self.mirror('y')).pack(side='left',expand=True,fill='x',padx=(2,0))
+        row2=tk.Frame(li,bg='#ffffff');row2.pack(fill='x',pady=(4,0))
+        ttk.Button(row2,text='По центру',command=lambda:self.align('center')).pack(side='left',expand=True,fill='x',padx=(0,2))
+        ttk.Button(row2,text='К левому',command=lambda:self.align('left')).pack(side='left',expand=True,fill='x',padx=(2,0))
+        row3=tk.Frame(li,bg='#ffffff');row3.pack(fill='x',pady=(4,0))
+        ttk.Button(row3,text='Дублировать…',command=self.duplicate_many).pack(side='left',expand=True,fill='x',padx=(0,2))
+        ttk.Button(row3,text='Удалить',command=self.delete).pack(side='left',expand=True,fill='x',padx=(2,0))
+
+        center=tk.Frame(work,bg='#eef2f5');center.pack(side='left',fill='both',expand=True,padx=14)
+        canvas_shell=tk.Frame(center,bg='#ffffff',highlightthickness=1,highlightbackground='#dbe3ea')
+        canvas_shell.pack(fill='both',expand=True)
+        canvas_top=tk.Frame(canvas_shell,bg='#ffffff',height=44);canvas_top.pack(fill='x');canvas_top.pack_propagate(False)
+        tk.Label(canvas_top,text='Рабочий стол A1  •  256 × 256 мм',bg='#ffffff',fg='#334155',font=('Segoe UI',10,'bold')).pack(side='left',padx=12)
+        ttk.Button(canvas_top,text='−',width=3,command=lambda:self.set_zoom(self.zoom/1.2)).pack(side='right',padx=(2,8),pady=7)
+        ttk.Button(canvas_top,text='+',width=3,command=lambda:self.set_zoom(self.zoom*1.2)).pack(side='right',pady=7)
+        self.canvas=tk.Canvas(canvas_shell,bg='#f7f9fb',highlightthickness=0)
+        self.canvas.pack(fill='both',expand=True,padx=1,pady=(0,1));self.canvas.bind('<Configure>',lambda e:self.draw());self.canvas.bind('<MouseWheel>',self.on_wheel);self.canvas.bind('<Button-1>',self.on_canvas_press);self.canvas.bind('<B1-Motion>',self.on_canvas_drag);self.canvas.bind('<ButtonRelease-1>',self.on_canvas_release)
+
+        right=RoundedPanel(work,width=330,radius=18,fill='#ffffff',outline='#dde3e9',pad=16,parent_bg='#eef2f5')
+        right.pack(side='right',fill='y');right.pack_propagate(False)
+        ri=right.inner
+        tk.Label(ri,text='Задание',bg='#ffffff',fg='#0f172a',font=('Segoe UI',13,'bold')).pack(anchor='w')
+        tk.Label(ri,text='Выберите только тип работы. Остальные параметры — в настройках.',bg='#ffffff',fg='#64748b',font=('Segoe UI',9),wraplength=280,justify='left').pack(anchor='w',pady=(2,12))
+
+        self.material_var=tk.StringVar(value=self.project.material.name)
         self.mode=tk.StringVar();self.passes=tk.IntVar();self.work_speed=tk.DoubleVar();self.travel_speed=tk.DoubleVar();self.work_z=tk.DoubleVar();self.safe_z=tk.DoubleVar();self.blade_offset=tk.DoubleVar();self.overcut=tk.DoubleVar()
         self.drawing_style=tk.StringVar();self.fill_spacing=tk.DoubleVar();self.fill_angle=tk.DoubleVar();self.fill_crosshatch=tk.BooleanVar();self.fill_inset=tk.DoubleVar();self.pen_press=tk.DoubleVar();self.pen_lift=tk.DoubleVar()
-        r=ttk.Frame(right);r.pack(fill='x',pady=2);ttk.Label(r,text='Режим').pack(anchor='w');mode_cb=ttk.Combobox(r,textvariable=self.mode,values=['Резка','Рисование'],state='readonly');mode_cb.pack(fill='x');mode_cb.bind('<<ComboboxSelected>>',lambda e:self.on_mode_changed())
-        for label,var in [('Проходов',self.passes),('Рабочая скорость, мм/с',self.work_speed),('Холостой ход, мм/с',self.travel_speed),('Рабочая высота Z',self.work_z),('Безопасная высота Z',self.safe_z),('Blade offset, мм',self.blade_offset),('Overcut, мм',self.overcut)]:
-            r=ttk.Frame(right);r.pack(fill='x',pady=2);ttk.Label(r,text=label).pack(anchor='w');ttk.Entry(r,textvariable=var).pack(fill='x')
-        draw_box=ttk.LabelFrame(right,text='Рисование / заливка',padding=6);draw_box.pack(fill='x',pady=6)
-        ttk.Label(draw_box,text='Что рисовать').pack(anchor='w');ttk.Combobox(draw_box,textvariable=self.drawing_style,values=['Контур + заливка','Только заливка','Только контур'],state='readonly').pack(fill='x')
-        for label,var in [('Шаг заливки, мм',self.fill_spacing),('Угол заливки, °',self.fill_angle),('Отступ заливки от края, мм',self.fill_inset),('Прижим ручки ниже Z касания, мм',self.pen_press),('Подъём ручки над Z касания, мм',self.pen_lift)]:
-            rr=ttk.Frame(draw_box);rr.pack(fill='x',pady=2);ttk.Label(rr,text=label).pack(anchor='w');ttk.Entry(rr,textvariable=var).pack(fill='x')
-        ttk.Checkbutton(draw_box,text='Перекрёстная заливка (второй проход +90°)',variable=self.fill_crosshatch).pack(anchor='w',pady=3);ttk.Button(draw_box,text='Применить и обновить предпросмотр',command=self.apply_job_settings).pack(fill='x',pady=(4,0))
-        ttk.Label(right,text='Подсказка: объект можно перетаскивать мышкой прямо по полю A1.',foreground='#475569',wraplength=300).pack(fill='x',pady=(4,2))
-        ttk.Label(right,text='⚠ Для рисования Z калибровки — это ПЕРВОЕ касание без нажима. Прижим ручки задаётся отдельно и ограничен 0…0,5 мм.',foreground='#b45309',wraplength=300).pack(fill='x',pady=8)
-        self.calib_label=ttk.Label(right,text='');self.calib_label.pack(fill='x',pady=5)
-        ttk.Button(right,text='Мастер подготовки и запуска',style='Danger.TButton',command=self.launch_wizard).pack(fill='x',pady=6)
-        ttk.Button(right,text='Экспортировать задание',command=self.export).pack(fill='x',pady=3)
-        ttk.Button(right,text='Экспорт + отправить по LAN',command=self.export_and_send).pack(fill='x',pady=3)
-        bottom=ttk.Frame(self,padding=(10,4));bottom.pack(fill='x');self.status=ttk.Label(bottom,text='');self.status.pack(side='left');self.warn=ttk.Label(bottom,text='',foreground='#b45309');self.warn.pack(side='right')
+
+        modebox=tk.Frame(ri,bg='#f1f5f9',height=50);modebox.pack(fill='x');modebox.pack_propagate(False)
+        self.cut_mode_btn=RoundedButton(modebox,'РЕЗКА',lambda:self.set_mode_quick('Резка'),width=135,height=40,radius=12,bg='#0f766e',fg='white',hover='#115e59',parent_bg='#f1f5f9')
+        self.cut_mode_btn.pack(side='left',padx=(4,2),pady=5)
+        self.draw_mode_btn=RoundedButton(modebox,'РИСОВАНИЕ',lambda:self.set_mode_quick('Рисование'),width=145,height=40,radius=12,bg='#e2e8f0',fg='#475569',hover='#cbd5e1',parent_bg='#f1f5f9')
+        self.draw_mode_btn.pack(side='right',padx=(2,4),pady=5)
+
+        self.main_summary=tk.Label(ri,text='',bg='#ffffff',fg='#475569',font=('Segoe UI',9),justify='left',anchor='w',wraplength=285)
+        self.main_summary.pack(fill='x',pady=(12,8))
+        ttk.Button(ri,text='⚙  Настройки задания',command=lambda:open_job_settings(self)).pack(fill='x',pady=(0,10))
+        self.calib_label=tk.Label(ri,text='',bg='#ffffff',fg='#b91c1c',font=('Segoe UI',9,'bold'),justify='left',anchor='w',wraplength=285)
+        self.calib_label.pack(fill='x',pady=(2,8))
+        ttk.Button(ri,text='Калибровка инструмента',command=lambda:open_calibration_wizard(self)).pack(fill='x',pady=(0,16))
+
+        sep=tk.Frame(ri,bg='#e2e8f0',height=1);sep.pack(fill='x',pady=(0,16))
+        self.slice_btn=RoundedButton(ri,'НАРЕЗАТЬ',self.export,width=285,height=48,radius=15,bg='#0f172a',fg='white',hover='#1e293b',parent_bg='#ffffff',font=('Segoe UI',11,'bold'))
+        self.slice_btn.pack(fill='x',pady=(0,8))
+        self.send_btn=RoundedButton(ri,'НАРЕЗАТЬ И ОТПРАВИТЬ',self.export_and_send,width=285,height=52,radius=15,bg='#f97316',fg='white',hover='#ea580c',parent_bg='#ffffff',font=('Segoe UI',11,'bold'))
+        self.send_btn.pack(fill='x')
+        ttk.Button(ri,text='Анимация траектории',command=self.animate_preview).pack(fill='x',pady=(14,4))
+        ttk.Button(ri,text='Профиль принтера / G-code',command=self.printer_profile).pack(fill='x')
+
+        bottom=tk.Frame(self,bg='#ffffff',height=34);bottom.pack(fill='x');bottom.pack_propagate(False)
+        self.status=tk.Label(bottom,text='',bg='#ffffff',fg='#475569',font=('Segoe UI',9));self.status.pack(side='left',padx=14)
+        self.warn=tk.Label(bottom,text='',bg='#ffffff',fg='#b45309',font=('Segoe UI',9,'bold'));self.warn.pack(side='right',padx=14)
+
+    def set_printer_status(self,text,kind='idle'):
+        self._printer_status_value=str(text);self._printer_status_kind=str(kind)
+        colors={
+            'ok':('#dcfce7','#166534','#bbf7d0'),
+            'warn':('#fef3c7','#92400e','#fde68a'),
+            'bad':('#fee2e2','#991b1b','#fecaca'),
+            'idle':('#e2e8f0','#475569','#cbd5e1'),
+        }
+        bg,fg,hover=colors.get(kind,colors['idle'])
+        if hasattr(self,'printer_chip'):
+            label=str(text)
+            if len(label)>35:label=label[:32]+'…'
+            self.printer_chip.config(text=label,bg=bg,fg=fg,hover=hover)
+
+    def _poll_printer_status(self):
+        c=getattr(self,'_lan_client',None)
+        if c is not None:
+            try:
+                if c.connected:
+                    st=c.status_summary();state=str(st.get('gcode_state') or '—')
+                    self.set_printer_status(f'A1 • {c.host} • {state}','ok')
+                elif self._printer_status_kind=='ok':
+                    self.set_printer_status(f'A1 • {c.host} • нет связи','bad')
+            except Exception:pass
+        try:self.after(1500,self._poll_printer_status)
+        except Exception:pass
+
+    def set_mode_quick(self,mode):
+        self.mode.set(mode);self.project.material.mode=mode
+        self.apply_job_settings();self._refresh_mode_buttons();self.update_main_summary()
+
+    def _refresh_mode_buttons(self):
+        if not hasattr(self,'cut_mode_btn'):return
+        cutting=self.mode.get()!='Рисование'
+        self.cut_mode_btn.config(bg='#0f766e' if cutting else '#e2e8f0',fg='white' if cutting else '#475569',hover='#115e59' if cutting else '#cbd5e1')
+        self.draw_mode_btn.config(bg='#7c3aed' if not cutting else '#e2e8f0',fg='white' if not cutting else '#475569',hover='#6d28d9' if not cutting else '#cbd5e1')
+
+    def update_main_summary(self):
+        if not hasattr(self,'main_summary'):return
+        m=self.project.material
+        typ='Рисование' if m.mode=='Рисование' else 'Резка'
+        extra=(f"Штриховка {m.fill_spacing:.2f} мм • {m.fill_angle:.0f}°" if m.mode=='Рисование' else f"{m.passes} проход(а) • {m.work_speed:.0f} мм/с")
+        self.main_summary.config(text=f'{typ}\nПрофиль: {m.name}\n{extra}')
+
+    def _close_app(self):
+        c=getattr(self,'_lan_client',None)
+        if c is not None:
+            try:c.close()
+            except Exception:pass
+        self.destroy()
+
     def current_index(self):
         s=self.listbox.curselection();return s[0] if s else None
     def load_obj_fields(self):
