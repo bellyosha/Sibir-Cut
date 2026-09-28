@@ -35,6 +35,41 @@ def transform_path(path: Path, x=0, y=0, scale=1.0, rotation_deg=0.0, mirror_x=F
 def transformed_paths(obj: SceneObject):
     return [transform_path(p,obj.x,obj.y,obj.scale,obj.rotation_deg,obj.mirror_x,obj.mirror_y) for p in obj.paths]
 
+def object_local_center(obj: SceneObject):
+    """Center of the untransformed source geometry."""
+    x0,y0,x1,y1=bbox(obj.paths)
+    return ((x0+x1)/2.0,(y0+y1)/2.0)
+
+def object_world_center(obj: SceneObject):
+    """World-space center of an object after mirror/scale/rotation/translation."""
+    cx,cy=object_local_center(obj)
+    if obj.mirror_x: cx=-cx
+    if obj.mirror_y: cy=-cy
+    s=float(obj.scale)
+    cx*=s;cy*=s
+    a=math.radians(float(obj.rotation_deg));ca,sa=math.cos(a),math.sin(a)
+    return (cx*ca-cy*sa+float(obj.x),cx*sa+cy*ca+float(obj.y))
+
+def set_object_transform_about_center(
+    obj: SceneObject,
+    world_center,
+    *,
+    scale=None,
+    rotation_deg=None,
+):
+    """Change scale/rotation while keeping the visual geometry center fixed."""
+    if scale is not None: obj.scale=max(0.001,float(scale))
+    if rotation_deg is not None: obj.rotation_deg=float(rotation_deg)
+    cx,cy=object_local_center(obj)
+    if obj.mirror_x: cx=-cx
+    if obj.mirror_y: cy=-cy
+    cx*=float(obj.scale);cy*=float(obj.scale)
+    a=math.radians(float(obj.rotation_deg));ca,sa=math.cos(a),math.sin(a)
+    rx=cx*ca-cy*sa;ry=cx*sa+cy*ca
+    obj.x=float(world_center[0])-rx
+    obj.y=float(world_center[1])-ry
+    return obj
+
 def _bezier3(p0,p1,p2,p3,t):
     u=1-t
     return (u**3*p0[0]+3*u*u*t*p1[0]+3*u*t*t*p2[0]+t**3*p3[0],
