@@ -3,9 +3,10 @@
         w=tk.Toplevel(self);w.title('Профиль оборудования — Bambu Lab A1 + UMTS');w.geometry('760x760');w.transient(self);w.grab_set();p=self.project.printer
         outer=ttk.Frame(w,padding=10);outer.pack(fill='both',expand=True);canvas=tk.Canvas(outer,highlightthickness=0);sb=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview);inner=ttk.Frame(canvas);inner.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')));canvas.create_window((0,0),window=inner,anchor='nw');canvas.configure(yscrollcommand=sb.set);canvas.pack(side='left',fill='both',expand=True);sb.pack(side='right',fill='y')
         vals={}
-        fields=[('name','Название'),('bed_width','Ширина поля, мм'),('bed_height','Высота поля, мм'),('margin_left','Отступ слева'),('margin_right','Отступ справа'),('margin_bottom','Отступ снизу'),('margin_top','Отступ сверху'),('tool_offset_x','Смещение инструмента X'),('tool_offset_y','Смещение инструмента Y'),('work_z','Рабочая высота Z'),('safe_z','Безопасная высота Z'),('park_x','Парковка установки X'),('park_y','Парковка установки Y'),('install_wait_seconds','Ожидание установки UMTS, сек'),('remove_wait_seconds','Ожидание снятия UMTS, сек'),('max_work_speed','Макс. рабочая скорость'),('max_travel_speed','Макс. холостая скорость'),('max_accel','Макс. ускорение'),('min_z','Минимальный Z'),('max_z','Максимальный Z')]
+        fields=[('name','Название'),('bed_width','Ширина поля, мм'),('bed_height','Высота поля, мм'),('margin_left','Отступ слева'),('margin_right','Отступ справа'),('margin_bottom','Отступ снизу'),('margin_top','Отступ сверху'),('park_x','Парковка установки X'),('park_y','Парковка установки Y'),('install_wait_seconds','Ожидание установки UMTS, сек'),('remove_wait_seconds','Ожидание снятия UMTS, сек'),('max_work_speed','Макс. рабочая скорость'),('max_travel_speed','Макс. холостая скорость'),('max_accel','Макс. ускорение'),('min_z','Минимальный Z'),('max_z','Максимальный Z')]
         for key,lab in fields:
             r=ttk.Frame(inner);r.pack(fill='x',pady=2);ttk.Label(r,text=lab,width=29).pack(side='left');v=tk.StringVar(value=str(getattr(p,key)));ttk.Entry(r,textvariable=v).pack(side='left',fill='x',expand=True);vals[key]=v
+        ttk.Label(inner,text='Offset X/Y и Z теперь настраиваются отдельно для ножа и ручки через «LAN управление» / «Калибровка» и применяются автоматически.',foreground='#475569',wraplength=700).pack(fill='x',anchor='w',pady=(8,4))
         ttk.Label(inner,text='Стартовый G-code',style='Title.TLabel').pack(anchor='w',pady=(10,2));start=tk.Text(inner,height=12,wrap='none');start.pack(fill='x');start.insert('1.0',p.start_template)
         ttk.Label(inner,text='Конечный G-code',style='Title.TLabel').pack(anchor='w',pady=(10,2));end=tk.Text(inner,height=9,wrap='none');end.pack(fill='x');end.insert('1.0',p.end_template)
         bar=ttk.Frame(inner);bar.pack(fill='x',pady=10)
@@ -13,7 +14,7 @@
             self.checkpoint()
             try:
                 for k,v in vals.items():setattr(p,k,v.get() if k=='name' else float(v.get()))
-                p.start_template=start.get('1.0','end-1c');p.end_template=end.get('1.0','end-1c');p.calibrated=False
+                p.start_template=start.get('1.0','end-1c');p.end_template=end.get('1.0','end-1c');p.apply_tool_calibration(self.project.material.mode)
                 w.destroy();self.refresh_all()
             except Exception as e:messagebox.showerror('Профиль',str(e),parent=w)
         def exportp():
@@ -24,7 +25,7 @@
             if not f:return
             try:self.checkpoint();self.project.printer=type(p).from_dict(json.loads(Path(f).read_text(encoding='utf-8')));w.destroy();self.refresh_all()
             except Exception as e:messagebox.showerror('Профиль',str(e),parent=w)
-        ttk.Button(bar,text='Импорт профиля',command=importp).pack(side='left');ttk.Button(bar,text='Экспорт профиля',command=exportp).pack(side='left',padx=4);ttk.Button(bar,text='Применить (потребуется калибровка)',command=apply).pack(side='right')
+        ttk.Button(bar,text='Импорт профиля',command=importp).pack(side='left');ttk.Button(bar,text='Экспорт профиля',command=exportp).pack(side='left',padx=4);ttk.Button(bar,text='Применить',command=apply).pack(side='right')
     def animate_preview(self):
         paths=self.prepared_paths
         if not paths:return
