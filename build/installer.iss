@@ -1,5 +1,5 @@
 #define MyAppName "Sibir Cut"
-#define MyAppVersion "0.2.17"
+#define MyAppVersion "0.3.0"
 #define MyAppExeName "SibirCut.exe"
 
 [Setup]
@@ -9,7 +9,7 @@ AppVersion={#MyAppVersion}
 DefaultDirName={localappdata}\Programs\Sibir Cut
 DefaultGroupName=Sibir Cut
 OutputDir=..\dist
-OutputBaseFilename=Sibir_Cut_Setup_0.2.17_x64
+OutputBaseFilename=Sibir_Cut_Setup_0.3.0_x64
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
