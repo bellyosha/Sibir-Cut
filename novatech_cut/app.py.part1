@@ -8,7 +8,7 @@ from .geometry import bbox, path_length, transformed_paths
 from .gcode import generate_gcode, GCodeError, analyze_path_bounds
 from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
-from .lan_gui import open_lan_control
+from .lan_gui import open_lan_control, upload_path_via_lan
 
 APP_TITLE='Sibir Cut 0.2.15'
 
@@ -59,6 +59,7 @@ class App(tk.Tk):
         self.calib_label=ttk.Label(right,text='');self.calib_label.pack(fill='x',pady=5)
         ttk.Button(right,text='Мастер подготовки и запуска',style='Danger.TButton',command=self.launch_wizard).pack(fill='x',pady=6)
         ttk.Button(right,text='Экспортировать задание',command=self.export).pack(fill='x',pady=3)
+        ttk.Button(right,text='Экспорт + отправить по LAN',command=self.export_and_send).pack(fill='x',pady=3)
         bottom=ttk.Frame(self,padding=(10,4));bottom.pack(fill='x');self.status=ttk.Label(bottom,text='');self.status.pack(side='left');self.warn=ttk.Label(bottom,text='',foreground='#b45309');self.warn.pack(side='right')
     def current_index(self):
         s=self.listbox.curselection();return s[0] if s else None
