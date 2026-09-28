@@ -416,7 +416,7 @@ def open_lan_control(app):
         try:
             c=ready(require_home=True,require_pos=True);z=candidate_z['value']
             if z is None:raise BambuLanError('Сначала выберите Z теста')
-            nx,ny,nx2=tool_point(10.0);safe=max(float(app.project.printer.safe_z),float(app.project.material.safe_z),float(z)+1.0);safe=min(safe,app.project.printer.max_z)
+            nx,ny,nx2=tool_point(10.0);cur=app.project.printer.get_tool_calibration(selected_tool_key());safe=max(float(cur['safe_z']),float(app.project.material.safe_z),float(z)+1.0);safe=min(safe,app.project.printer.max_z)
             c.send_gcode(f'G90\nG1 Z{safe:.3f} F600\nM400\nG1 X{nx:.3f} Y{ny:.3f} F2400\nM400\nG1 Z{float(z):.3f} F120\nM400\nG1 X{nx2:.3f} Y{ny:.3f} F300\nM400\nG1 Z{safe:.3f} F600\nM400')
             c.set_known_position(x=nx2,y=ny,z=safe,source='command');save_cfg()
         except Exception as exc:messagebox.showerror('Тестовая линия',str(exc),parent=w)
@@ -625,8 +625,10 @@ def open_lan_control(app):
     for btn,ax,val in axis_buttons:btn.config(command=lambda a=ax,v=val:axis_jog(a,v))
     ref_btn.config(command=set_offset_reference);calc_offset_btn.config(command=calculate_offset)
     for btn,ax,sgn in xy_buttons:btn.config(command=lambda a=ax,s=sgn:jog_offset_xy(a,s))
-    tool_choice.trace_add('write',lambda *_:(set_candidate(app.project.printer.get_tool_calibration(selected_tool_key()).get('z',0.0)),update_offset_status()))
     sync_btn.config(command=do_sync);lower_btn.config(command=lambda:fine_z(-abs(float(fine_step.get()))));raise_btn.config(command=lambda:fine_z(abs(float(fine_step.get()))));line_btn.config(command=test_line)
     save_contact_btn.config(command=save_contact);save_press_btn.config(command=save_press);save_knife_btn.config(command=save_knife)
-    update_offset_status()
+    def tool_changed(*_):
+        candidate_z['value']=None;candidate_status.set('Z теста: —');update_offset_status()
+    tool_choice.trace_add('write',tool_changed)
+    load_saved_tool_calibrations();update_offset_status()
     w.protocol('WM_DELETE_WINDOW',closed);poll();w.after(350,scan_network)
