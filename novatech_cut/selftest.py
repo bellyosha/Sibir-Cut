@@ -4,7 +4,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
-from .geometry import path_length, load_raster, _morphological_skeleton, hatch_fill_paths
+from .geometry import path_length, load_raster, _morphological_skeleton, hatch_fill_paths, object_world_center, set_object_transform_about_center
 from .gcode import generate_gcode, validate_gcode, analyze_path_bounds, GCodeError
 from .lan import lan_self_test
 from .discovery import discovery_self_test
@@ -162,6 +162,22 @@ def _mirror_job_regression_test() -> None:
     for got,want in zip(mirrored[0],expected):
         if abs(got[0]-want[0])>1e-6 or abs(got[1]-want[1])>1e-6:
             raise RuntimeError('Whole-job horizontal mirror is incorrect')
+
+def _live_transform_regression_test() -> None:
+    obj=SceneObject('live-transform',[[(0.0,0.0),(40.0,0.0),(40.0,20.0),(0.0,20.0),(0.0,0.0)]],x=73.0,y=61.0,scale=1.25,rotation_deg=17.0)
+    center0=object_world_center(obj)
+    set_object_transform_about_center(obj,center0,rotation_deg=123.4,scale=2.15)
+    center1=object_world_center(obj)
+    if abs(center1[0]-center0[0])>1e-8 or abs(center1[1]-center0[1])>1e-8:
+        raise RuntimeError('Live rotate/scale moved the object center')
+    if abs(obj.rotation_deg-123.4)>1e-9 or abs(obj.scale-2.15)>1e-9:
+        raise RuntimeError('Live transform did not apply requested rotation/scale')
+    obj.mirror_x=True
+    center2=object_world_center(obj)
+    set_object_transform_about_center(obj,center2,rotation_deg=-41.25,scale=0.75)
+    center3=object_world_center(obj)
+    if abs(center3[0]-center2[0])>1e-8 or abs(center3[1]-center2[1])>1e-8:
+        raise RuntimeError('Live transform moved mirrored object center')
 
 def _bounds_regression_test() -> None:
     project=Project();project.printer.calibrated=True
@@ -348,6 +364,7 @@ def run_self_test() -> None:
         _centerline_completeness_regression_test()
         _drawing_fill_regression_test()
         _mirror_job_regression_test()
+        _live_transform_regression_test()
         _bounds_regression_test()
         _tool_calibration_regression_test()
         _drawing_z_safety_regression_test()
