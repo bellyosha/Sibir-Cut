@@ -523,6 +523,36 @@ def open_lan_control(app):
             scan_status.set(f'Выбран IP {p.ip}; SSDP не сообщил серийный номер — введите SN вручную.')
         try:save_cfg()
         except Exception:pass
+    def upload_done(result,error):
+        upload_state['busy']=False
+        try:
+            send_last_btn.config(state='normal');send_file_btn.config(state='normal');cancel_upload_btn.config(state='disabled')
+        except Exception:pass
+        if result:
+            upload_status.set(f"Отправлено: {result.get('remote_path')} • {result.get('size_bytes')} байт")
+        elif error:
+            upload_status.set('Ошибка/отмена: '+str(error))
+    def send_path(path):
+        if not path:return
+        if upload_state['busy']:return
+        upload_state['busy']=True
+        send_last_btn.config(state='disabled');send_file_btn.config(state='disabled');cancel_upload_btn.config(state='normal')
+        upload_status.set('Передача файла…')
+        ok=upload_path_via_lan(app,path,parent=w,on_done=upload_done)
+        if not ok:upload_done(None,'Передача не начата')
+    def send_last():
+        path=getattr(app,'last_export_path',None)
+        if not path:
+            messagebox.showwarning('Файлы по LAN','Сначала экспортируйте задание.',parent=w);return
+        send_path(path)
+    def choose_and_send():
+        path=filedialog.askopenfilename(parent=w,title='Выберите G-code для Bambu',filetypes=[('G-code','*.gcode'),('Все файлы','*.*')])
+        if path:send_path(path)
+    def cancel_upload():
+        ev=getattr(app,'_lan_upload_cancel',None)
+        if ev is not None:
+            try:ev.set();upload_status.set('Отмена передачи…')
+            except Exception:pass
     def refresh_status():
         c=client()
         if c is not None and c.connected:
@@ -590,8 +620,13 @@ def open_lan_control(app):
 
     connect_btn.config(command=connect_now);disconnect_btn.config(command=disconnect);refresh_btn.config(command=refresh_status)
     scan_btn.config(command=scan_network);stop_scan_btn.config(command=stop_scan);use_scan_btn.config(command=use_selected_printer);printer_tree.bind('<Double-1>',use_selected_printer)
+    send_last_btn.config(command=send_last);send_file_btn.config(command=choose_and_send);cancel_upload_btn.config(command=cancel_upload)
     home_btn.config(command=do_home);manual_home_btn.config(command=manual_home_done)
     for btn,ax,val in axis_buttons:btn.config(command=lambda a=ax,v=val:axis_jog(a,v))
+    ref_btn.config(command=set_offset_reference);calc_offset_btn.config(command=calculate_offset)
+    for btn,ax,sgn in xy_buttons:btn.config(command=lambda a=ax,s=sgn:jog_offset_xy(a,s))
+    tool_choice.trace_add('write',lambda *_:(set_candidate(app.project.printer.get_tool_calibration(selected_tool_key()).get('z',0.0)),update_offset_status()))
     sync_btn.config(command=do_sync);lower_btn.config(command=lambda:fine_z(-abs(float(fine_step.get()))));raise_btn.config(command=lambda:fine_z(abs(float(fine_step.get()))));line_btn.config(command=test_line)
     save_contact_btn.config(command=save_contact);save_press_btn.config(command=save_press);save_knife_btn.config(command=save_knife)
+    update_offset_status()
     w.protocol('WM_DELETE_WINDOW',closed);poll();w.after(350,scan_network)
