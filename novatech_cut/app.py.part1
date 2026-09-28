@@ -10,7 +10,7 @@ from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
 from .lan_gui import open_lan_control, upload_path_via_lan
 
-APP_TITLE='Sibir Cut 0.2.16'
+APP_TITLE='Sibir Cut 0.2.17'
 
 class App(tk.Tk):
     def __init__(self):
