@@ -135,6 +135,11 @@ def calibration_gui_self_test():
         app.set_mode_quick('Резка')
         if app.mode.get()!='Резка':
             raise RuntimeError('Main mode switch failed')
+        app.project.objects=[SceneObject('transform-smoke',[[(20.0,20.0),(50.0,20.0),(45.0,40.0),(20.0,20.0)]])]
+        app.refresh_all();app.listbox.selection_set(0);app.listbox.activate(0);app.load_obj_fields();app.update_idletasks()
+        handles=app._transform_handles(0)
+        if not handles or 'rotate' not in handles or 'scale' not in handles:
+            raise RuntimeError('Live transform handles were not created')
     finally:
         if app is not None:
             try:app.destroy()
