@@ -211,6 +211,9 @@ class BambuLanScanner:
     def _emit(self, p: DiscoveredPrinter) -> None:
         key = self._key(p)
         with self._lock:
+            # A rich SSDP record always wins over a bare TCP:8883 candidate.
+            if p.source == "tcp" and any(other.ip == p.ip and other.source == "ssdp" for other in self._found.values()):
+                return
             old = self._found.get(key)
             if old is not None:
                 # Prefer rich SSDP metadata over a bare port-scan candidate.
