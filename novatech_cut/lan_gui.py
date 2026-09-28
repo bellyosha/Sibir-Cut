@@ -122,6 +122,14 @@ def open_lan_control(app):
     printer_tree.pack(fill='x',pady=(8,0))
     ttk.Label(scanbox,text='Access code по сети не передаётся. После выбора принтера введите его один раз вручную или включите «Запомнить access code».',foreground='#475569',wraplength=760).pack(anchor='w',pady=(6,0))
 
+    files_box=ttk.LabelFrame(body,text='Файлы по LAN',padding=10);files_box.pack(fill='x',pady=(10,0))
+    fr=ttk.Frame(files_box);fr.pack(fill='x')
+    send_last_btn=ttk.Button(fr,text='Отправить последний экспорт');send_last_btn.pack(side='left',expand=True,fill='x')
+    send_file_btn=ttk.Button(fr,text='Выбрать .gcode и отправить…');send_file_btn.pack(side='left',expand=True,fill='x',padx=(6,0))
+    cancel_upload_btn=ttk.Button(fr,text='Отмена передачи',state='disabled');cancel_upload_btn.pack(side='left',padx=(6,0))
+    ttk.Label(files_box,textvariable=upload_status).pack(anchor='w',pady=(6,0))
+    ttk.Label(files_box,text='Файл загружается на принтер локально по FTPS/TLS в папку cache. Автоматический запуск пока не выполняется.',foreground='#475569',wraplength=760).pack(anchor='w',pady=(3,0))
+
     stat=ttk.LabelFrame(body,text='Состояние и координаты',padding=10);stat.pack(fill='x',pady=(10,0))
     ttk.Label(stat,textvariable=printer_status,style='Title.TLabel').pack(anchor='w')
     ttk.Label(stat,textvariable=feature_status).pack(anchor='w',pady=(3,0))
@@ -151,7 +159,24 @@ def open_lan_control(app):
             btn=ttk.Button(grid,text=f'{val:+.0f} мм')
             btn.grid(row=row,column=col,sticky='ew',padx=2,pady=2);axis_buttons.append((btn,ax,val))
 
-    calib=ttk.LabelFrame(body,text='Точная настройка ножа / ручки на тестовом участке',padding=10);calib.pack(fill='x',pady=(10,0))
+    offset_box=ttk.LabelFrame(body,text='Калибровка Offset X/Y — где нож/ручка относительно сопла',padding=10);offset_box.pack(fill='x',pady=(10,0))
+    topoff=ttk.Frame(offset_box);topoff.pack(fill='x')
+    ttk.Label(topoff,text='Калибруем:').pack(side='left')
+    ttk.Combobox(topoff,textvariable=tool_choice,values=['Нож','Ручка'],state='readonly',width=12).pack(side='left',padx=(6,16))
+    ttk.Label(topoff,text='Опорная точка сопла X').pack(side='left');ttk.Entry(topoff,textvariable=ref_x,width=8).pack(side='left',padx=4)
+    ttk.Label(topoff,text='Y').pack(side='left');ttk.Entry(topoff,textvariable=ref_y,width=8).pack(side='left',padx=4)
+    ref_btn=ttk.Button(offset_box,text='1. Поставить СОПЛО в опорную точку');ref_btn.pack(fill='x',pady=(8,4))
+    ttk.Label(offset_box,text='После перемещения отметьте точку прямо под соплом на бумаге/малярной ленте. Затем установите UMTS и, не меняя метку, подведите к ней кончик выбранного инструмента.',wraplength=750).pack(anchor='w',pady=(2,6))
+    fine=ttk.Frame(offset_box);fine.pack(fill='x')
+    ttk.Label(fine,text='Шаг XY, мм').pack(side='left')
+    ttk.Combobox(fine,textvariable=offset_step,values=[0.05,0.10,0.20,0.50,1.00],state='readonly',width=8).pack(side='left',padx=6)
+    xy_buttons=[]
+    for txt,ax,sgn in [('X −','X',-1),('X +','X',1),('Y −','Y',-1),('Y +','Y',1)]:
+        bxy=ttk.Button(fine,text=txt);bxy.pack(side='left',expand=True,fill='x',padx=2);xy_buttons.append((bxy,ax,sgn))
+    calc_offset_btn=ttk.Button(offset_box,text='2. Кончик на метке — рассчитать и сохранить Offset X/Y');calc_offset_btn.pack(fill='x',pady=(8,4))
+    ttk.Label(offset_box,textvariable=offset_status).pack(anchor='w')
+
+    calib=ttk.LabelFrame(body,text='Точная настройка Z ножа / ручки на тестовом участке',padding=10);calib.pack(fill='x',pady=(10,0))
     pos=ttk.Frame(calib);pos.pack(fill='x',pady=(0,8))
     ttk.Label(pos,text='Точка КОНЧИКА инструмента X, мм').grid(row=0,column=0,sticky='w');ttk.Entry(pos,textvariable=test_x,width=9).grid(row=0,column=1,padx=(6,16))
     ttk.Label(pos,text='Y, мм').grid(row=0,column=2,sticky='w');ttk.Entry(pos,textvariable=test_y,width=9).grid(row=0,column=3,padx=6)
