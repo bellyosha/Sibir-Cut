@@ -18,8 +18,19 @@ class GCodeError(ValueError): pass
 
 def _fmt(v): return f"{v:.3f}".rstrip('0').rstrip('.')
 
+def nozzle_xy_for_tool_xy(x: float, y: float, printer: PrinterProfile):
+    """Convert desired tool-tip coordinates to nozzle coordinates.
+
+    Calibration stores the physical tool-tip offset from the nozzle:
+    tool_tip = nozzle + offset.
+    """
+    return (float(x)-float(printer.tool_offset_x), float(y)-float(printer.tool_offset_y))
+
+def tool_xy_for_nozzle_xy(x: float, y: float, printer: PrinterProfile):
+    return (float(x)+float(printer.tool_offset_x), float(y)+float(printer.tool_offset_y))
+
 def analyze_path_bounds(paths: List[Path], printer: PrinterProfile):
-    """Return geometric/tool-tip bounds and whether they stay inside the bed."""
+    """Return tool-tip and nozzle bounds and whether either leaves safe space."""
     if not paths:
         return {
             'geometry_bounds': (0.0,0.0,0.0,0.0),
@@ -28,35 +39,43 @@ def analyze_path_bounds(paths: List[Path], printer: PrinterProfile):
             'outside_physical': False,
         }
     gb=bbox(paths)
-    tb=(
-        gb[0]+printer.tool_offset_x,
-        gb[1]+printer.tool_offset_y,
-        gb[2]+printer.tool_offset_x,
-        gb[3]+printer.tool_offset_y,
+    # Geometry represents the path that the knife/pen tip must follow.
+    tb=gb
+    nb=(
+        gb[0]-printer.tool_offset_x,
+        gb[1]-printer.tool_offset_y,
+        gb[2]-printer.tool_offset_x,
+        gb[3]-printer.tool_offset_y,
     )
     l,b,r,t=printer.safe_bounds
-    outside_safe=tb[0]<l-1e-6 or tb[1]<b-1e-6 or tb[2]>r+1e-6 or tb[3]>t+1e-6
-    outside_physical=tb[0]<-1e-6 or tb[1]<-1e-6 or tb[2]>printer.bed_width+1e-6 or tb[3]>printer.bed_height+1e-6
+    tool_outside_safe=tb[0]<l-1e-6 or tb[1]<b-1e-6 or tb[2]>r+1e-6 or tb[3]>t+1e-6
+    tool_outside_physical=tb[0]<-1e-6 or tb[1]<-1e-6 or tb[2]>printer.bed_width+1e-6 or tb[3]>printer.bed_height+1e-6
+    nozzle_outside_physical=nb[0]<-1e-6 or nb[1]<-1e-6 or nb[2]>printer.bed_width+1e-6 or nb[3]>printer.bed_height+1e-6
     return {
         'geometry_bounds': gb,
         'tool_bounds': tb,
-        'outside_safe': outside_safe,
-        'outside_physical': outside_physical,
+        'nozzle_bounds': nb,
+        'outside_safe': tool_outside_safe,
+        'outside_physical': tool_outside_physical or nozzle_outside_physical,
+        'tool_outside_physical': tool_outside_physical,
+        'nozzle_outside_physical': nozzle_outside_physical,
     }
 
 def _bounds_error_message(info, printer):
     x0,y0,x1,y1=info['tool_bounds']
+    nx0,ny0,nx1,ny1=info.get('nozzle_bounds',(x0,y0,x1,y1))
     l,b,r,t=printer.safe_bounds
     if info['outside_physical']:
         return (
-            "Траектория инструмента выходит за физические границы стола. "
-            f"С учётом Offset X/Y: X {x0:.2f}…{x1:.2f}, Y {y0:.2f}…{y1:.2f} мм; "
+            "Траектория инструмента или сопла выходит за физические границы стола. "
+            f"Кончики ножа/ручки: X {x0:.2f}…{x1:.2f}, Y {y0:.2f}…{y1:.2f} мм; "
+            f"сопло после компенсации Offset: X {nx0:.2f}…{nx1:.2f}, Y {ny0:.2f}…{ny1:.2f} мм; "
             f"стол: X 0…{printer.bed_width:.2f}, Y 0…{printer.bed_height:.2f} мм."
         )
     if info['outside_safe']:
         return (
-            "Траектория инструмента выходит за настроенную безопасную область. "
-            f"С учётом Offset X/Y: X {x0:.2f}…{x1:.2f}, Y {y0:.2f}…{y1:.2f} мм; "
+            "Траектория кончика инструмента выходит за настроенную безопасную область. "
+            f"Кончики ножа/ручки: X {x0:.2f}…{x1:.2f}, Y {y0:.2f}…{y1:.2f} мм; "
             f"безопасная зона: X {l:.2f}…{r:.2f}, Y {b:.2f}…{t:.2f} мм."
         )
     return ""
@@ -98,7 +117,7 @@ def generate_gcode(paths: List[Path], printer: PrinterProfile, material: Materia
         lines.append(f"; PASS {pass_no+1}/{material.passes}")
         for pi,path in enumerate(paths,1):
             if len(path)<2:continue
-            x0=path[0][0]+printer.tool_offset_x; y0=path[0][1]+printer.tool_offset_y
+            x0,y0=nozzle_xy_for_tool_xy(path[0][0],path[0][1],printer)
             lines.append(f"G1 Z{_fmt(safe_z)} F600 ; tool up")
             if material.mode=='Рисование':
                 lines.append("M400 ; wait until pen is fully lifted before XY travel")
@@ -108,7 +127,7 @@ def generate_gcode(paths: List[Path], printer: PrinterProfile, material: Materia
             if material.mode=='Рисование':
                 lines.append("M400 ; wait until pen reaches drawing Z")
             for x,y in path[1:]:
-                x+=printer.tool_offset_x;y+=printer.tool_offset_y
+                x,y=nozzle_xy_for_tool_xy(x,y,printer)
                 lines.append(f"G1 X{_fmt(x)} Y{_fmt(y)} F{_fmt(work_speed)}")
                 cut_len+=math.hypot(x-cur[0],y-cur[1]);cur=(x,y)
             lines.append(f"G1 Z{_fmt(safe_z)} F600 ; tool up")
