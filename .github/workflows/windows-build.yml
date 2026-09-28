@@ -100,13 +100,13 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "build\installer.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!(Test-Path "dist/Sibir_Cut_Setup_0.2.14_x64.exe")) { throw "Installer was not created" }
+          if (!(Test-Path "dist/Sibir_Cut_Setup_0.2.15_x64.exe")) { throw "Installer was not created" }
 
       - name: Test installer on clean directory
         shell: pwsh
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "SibirCutInstalled"
-          $setup = Resolve-Path "dist/Sibir_Cut_Setup_0.2.14_x64.exe"
+          $setup = Resolve-Path "dist/Sibir_Cut_Setup_0.2.15_x64.exe"
           $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART",("/DIR=" + $installDir) -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Installer failed: exit $($p.ExitCode)" }
           $installedExe = Join-Path $installDir "SibirCut.exe"
@@ -119,7 +119,7 @@ jobs:
         run: |
           Remove-Item novatech_cut/app.py.part* -Force
           $items = @("novatech_cut","build","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
-          Compress-Archive $items dist/Sibir_Cut_v0.2.14_SOURCE.zip -Force
+          Compress-Archive $items dist/Sibir_Cut_v0.2.15_SOURCE.zip -Force
 
       - name: Write SHA256 checksums
         shell: pwsh
@@ -127,8 +127,8 @@ jobs:
           @(
             "SibirCut.exe",
             "Sibir_Cut_Portable_Windows_x64.zip",
-            "Sibir_Cut_Setup_0.2.14_x64.exe",
-            "Sibir_Cut_v0.2.14_SOURCE.zip"
+            "Sibir_Cut_Setup_0.2.15_x64.exe",
+            "Sibir_Cut_v0.2.15_SOURCE.zip"
           ) | ForEach-Object {
             $h = Get-FileHash ("dist/" + $_) -Algorithm SHA256
             "$($h.Hash.ToLower())  $_"
@@ -151,13 +151,13 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: Sibir-Cut-Windows-v0.2.14
+          name: Sibir-Cut-Windows-v0.2.15
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/Sibir_Cut_Setup_0.2.14_x64.exe
+            dist/Sibir_Cut_Setup_0.2.15_x64.exe
             dist/Sibir_Cut_Portable_Windows_x64.zip
-            dist/Sibir_Cut_v0.2.14_SOURCE.zip
+            dist/Sibir_Cut_v0.2.15_SOURCE.zip
             dist/SHA256SUMS-WINDOWS.txt
 
       - name: Publish release fallback
@@ -166,10 +166,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.2.14"
+          $tag = "v0.2.15"
           $repo = "${{ github.repository }}"
           gh release view $tag --repo $repo *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $repo --target "${{ github.sha }}" --title "Sibir Cut 0.2.14" --notes "Windows build 0.2.14. Actions artifact storage fallback."
+            gh release create $tag --repo $repo --target "${{ github.sha }}" --title "Sibir Cut 0.2.15" --notes "Windows build 0.2.15. Actions artifact storage fallback."
           }
-          gh release upload $tag --repo $repo dist/Sibir_Cut_Setup_0.2.14_x64.exe dist/Sibir_Cut_Portable_Windows_x64.zip dist/Sibir_Cut_v0.2.14_SOURCE.zip dist/SHA256SUMS-WINDOWS.txt --clobber
+          gh release upload $tag --repo $repo dist/Sibir_Cut_Setup_0.2.15_x64.exe dist/Sibir_Cut_Portable_Windows_x64.zip dist/Sibir_Cut_v0.2.15_SOURCE.zip dist/SHA256SUMS-WINDOWS.txt --clobber
