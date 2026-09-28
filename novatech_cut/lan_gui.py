@@ -297,6 +297,60 @@ def open_lan_control(app):
         xy='OK' if cur.get('xy_calibrated') else 'нет'
         zz='OK' if cur.get('z_calibrated') else 'нет'
         offset_status.set(f"{selected_tool_name().capitalize()}: Offset X={cur['offset_x']:.3f}, Y={cur['offset_y']:.3f} мм • XY {xy} • Z {zz}")
+    def set_offset_reference():
+        try:
+            c=ready(require_home=True)
+            if not umts_removed.get():
+                raise BambuLanError('Для фиксации опорной точки сопло должно быть открыто: снимите UMTS и подтвердите галочкой «UMTS СНЯТ».')
+            rx=float(ref_x.get());ry=float(ref_y.get());p=app.project.printer
+            if not (0.0<=rx<=p.bed_width and 0.0<=ry<=p.bed_height):
+                raise BambuLanError('Опорная точка должна находиться внутри стола')
+            safe=max(float(p.safe_z),float(app.project.material.safe_z),5.0)
+            c.move_absolute(x=rx,y=ry,z=safe,feed=1500)
+            offset_ref['x']=rx;offset_ref['y']=ry
+            offset_status.set(f'Опорная точка сопла X={rx:.3f}, Y={ry:.3f}. Отметьте её, установите {selected_tool_name()} и совместите кончик с этой же меткой.')
+            save_cfg()
+        except Exception as exc:messagebox.showerror('Калибровка Offset',str(exc),parent=w)
+    def jog_offset_xy(axis,sign):
+        try:
+            c=ready(require_home=True,require_pos=True)
+            if offset_ref['x'] is None or offset_ref['y'] is None:
+                raise BambuLanError('Сначала выполните шаг 1: поставьте сопло в опорную точку.')
+            ps=c.position_snapshot();step=abs(float(offset_step.get()))*float(sign)
+            if axis=='X':
+                cur=ps.get('x')
+                if cur is None:raise BambuLanError('X не синхронизирован')
+                target=float(cur)+step
+                if not (0.0<=target<=app.project.printer.bed_width):raise BambuLanError('X вышел бы за границы стола')
+                c.move_absolute(x=target,feed=300)
+            else:
+                cur=ps.get('y')
+                if cur is None:raise BambuLanError('Y не синхронизирован')
+                target=float(cur)+step
+                if not (0.0<=target<=app.project.printer.bed_height):raise BambuLanError('Y вышел бы за границы стола')
+                c.move_absolute(y=target,feed=300)
+            ps2=c.position_snapshot()
+            ox=float(offset_ref['x'])-float(ps2['x']);oy=float(offset_ref['y'])-float(ps2['y'])
+            offset_status.set(f'Совмещайте кончик с меткой. Текущий расчёт: Offset X={ox:.3f}, Y={oy:.3f} мм')
+        except Exception as exc:messagebox.showerror('Калибровка Offset',str(exc),parent=w)
+    def calculate_offset():
+        try:
+            c=ready(require_home=True,require_pos=True)
+            if offset_ref['x'] is None or offset_ref['y'] is None:
+                raise BambuLanError('Сначала зафиксируйте опорную точку сопла.')
+            ps=c.position_snapshot()
+            if ps.get('x') is None or ps.get('y') is None:raise BambuLanError('X/Y не синхронизированы')
+            ox=float(offset_ref['x'])-float(ps['x']);oy=float(offset_ref['y'])-float(ps['y'])
+            if abs(ox)>80 or abs(oy)>80:
+                raise BambuLanError(f'Получился слишком большой Offset X={ox:.2f}, Y={oy:.2f} мм. Проверьте совмещение.')
+            key=selected_tool_key();app.checkpoint()
+            app.project.printer.set_tool_calibration(key,offset_x=ox,offset_y=oy,xy_calibrated=True)
+            persist_tool_calibration(key)
+            if app.project.printer.tool_key_for_mode(app.project.material.mode)==key:
+                app.apply_active_tool_calibration()
+            app.refresh_all();update_offset_status()
+            messagebox.showinfo('Калибровка Offset',f'{selected_tool_name().capitalize()} сохранён.\nOffset X={ox:.3f} мм\nOffset Y={oy:.3f} мм\n\nSibir Cut будет применять это смещение автоматически.',parent=w)
+        except Exception as exc:messagebox.showerror('Калибровка Offset',str(exc),parent=w)
     def reset_position():
         c=client()
         if c is not None:c.invalidate_position()
@@ -307,7 +361,9 @@ def open_lan_control(app):
         tx=float(test_x.get());ty=float(test_y.get());l0,b0,r0,t0=app.project.printer.safe_bounds
         if not (l0<=tx<=r0 and b0<=ty<=t0 and l0<=tx+line_len<=r0):
             raise BambuLanError(f'Тестовый участок инструмента должен быть внутри безопасной зоны X {l0:.1f}…{r0:.1f}, Y {b0:.1f}…{t0:.1f} мм.')
-        nx=tx-app.project.printer.tool_offset_x;ny=ty-app.project.printer.tool_offset_y;nx2=tx+line_len-app.project.printer.tool_offset_x
+        cur=app.project.printer.get_tool_calibration(selected_tool_key())
+        if not cur.get('xy_calibrated'):raise BambuLanError(f'Сначала откалибруйте Offset X/Y для инструмента «{selected_tool_name()}».')
+        nx=tx-float(cur['offset_x']);ny=ty-float(cur['offset_y']);nx2=tx+line_len-float(cur['offset_x'])
         if not (0<=nx<=app.project.printer.bed_width and 0<=nx2<=app.project.printer.bed_width and 0<=ny<=app.project.printer.bed_height):
             raise BambuLanError('С учётом Offset X/Y сопло вышло бы за физические границы стола.')
         return nx,ny,nx2
@@ -345,7 +401,7 @@ def open_lan_control(app):
         except Exception as exc:messagebox.showerror('Ось '+ax,str(exc),parent=w)
     def do_sync():
         try:
-            c=ready(require_home=True);nx,ny,_=tool_point();safe=max(float(app.project.printer.safe_z),float(app.project.material.safe_z))
+            c=ready(require_home=True);nx,ny,_=tool_point();cur=app.project.printer.get_tool_calibration(selected_tool_key());safe=max(float(cur['safe_z']),float(app.project.material.safe_z),5.0)
             if not (app.project.printer.min_z<=safe<=app.project.printer.max_z):raise BambuLanError('Безопасная Z профиля вне допустимого диапазона')
             c.send_gcode(f'M104 S0\nM140 S0\nG90\nG1 Z{safe:.3f} F600\nM400\nG1 X{nx:.3f} Y{ny:.3f} F3000\nM400')
             c.set_known_position(x=nx,y=ny,z=safe,source='command');set_candidate(safe);save_cfg()
