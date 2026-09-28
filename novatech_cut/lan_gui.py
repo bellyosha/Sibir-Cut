@@ -10,6 +10,58 @@ from .discovery import BambuLanScanner, DiscoveredPrinter
 from .transfer import upload_file, BambuTransferError, UploadCancelled
 
 
+def upload_path_via_lan(app, path, parent=None, on_done=None):
+    """Upload an already generated G-code to the connected printer over FTPS."""
+    parent=parent or app
+    client=getattr(app,'_lan_client',None)
+    if client is None or not getattr(client,'connected',False):
+        messagebox.showerror('Отправка по LAN','Сначала подключитесь к принтеру в окне «LAN управление».',parent=parent)
+        if on_done:
+            try:on_done(None,'Нет подключения к принтеру')
+            except Exception:pass
+        return False
+    if getattr(app,'_lan_upload_busy',False):
+        messagebox.showwarning('Отправка по LAN','Передача файла уже выполняется.',parent=parent);return False
+
+    cancel=threading.Event();app._lan_upload_busy=True
+    win=tk.Toplevel(parent);win.title('Отправка файла на Bambu');win.transient(parent);win.resizable(False,False)
+    box=ttk.Frame(win,padding=14);box.pack(fill='both',expand=True)
+    ttk.Label(box,text='Передача по LAN → FTPS/TLS 990',style='Title.TLabel').pack(anchor='w')
+    name=str(path).replace('\\','/').split('/')[-1]
+    status=tk.StringVar(value=f'Подготовка: {name}')
+    ttk.Label(box,textvariable=status,wraplength=480).pack(anchor='w',pady=(8,4))
+    pb=ttk.Progressbar(box,mode='determinate',maximum=100);pb.pack(fill='x',pady=5)
+    cancel_btn=ttk.Button(box,text='Отменить',command=cancel.set);cancel_btn.pack(anchor='e',pady=(6,0))
+    def progress(sent,total):
+        pct=0 if not total else min(100.0,max(0.0,sent*100.0/total))
+        try:app.after(0,lambda p=pct,s=sent,t=total:(pb.configure(value=p),status.set(f'Передача: {p:.0f}% • {s}/{t} байт')))
+        except Exception:pass
+    def worker():
+        result=None;err=None
+        try:result=upload_file(client.host,client.access_code,path,progress=progress,cancel=cancel)
+        except Exception as exc:err=exc
+        def finish():
+            app._lan_upload_busy=False
+            try:win.destroy()
+            except Exception:pass
+            if err is None:
+                verified='размер проверен' if result.get('verified_size') else 'сервер подтвердил STOR'
+                messagebox.showinfo('Отправка по LAN',f"Файл отправлен на A1.\n\n{result.get('remote_path')}\n{result.get('size_bytes')} байт • {verified}\n\nАвтоматический запуск задания не выполнялся.",parent=parent)
+                if on_done:
+                    try:on_done(result,None)
+                    except Exception:pass
+            else:
+                if not isinstance(err,UploadCancelled):
+                    messagebox.showerror('Отправка по LAN',str(err),parent=parent)
+                if on_done:
+                    try:on_done(None,str(err))
+                    except Exception:pass
+        try:app.after(0,finish)
+        except Exception:pass
+    threading.Thread(target=worker,daemon=True).start()
+    return True
+
+
 def open_lan_control(app):
     old=getattr(app,'_lan_window',None)
     if old is not None:
