@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from .lan import BambuLanClient, BambuLanError, load_lan_config, save_lan_config
+from .discovery import discover_bambu, DiscoveredBambu
 
 
 def open_lan_control(app):
@@ -40,8 +41,20 @@ def open_lan_control(app):
     candidate_status=tk.StringVar(value='Z теста: —')
 
     candidate_z={'value':None};connecting={'value':False};homing={'active':False,'started':0.0,'seen_busy':False};homed={'value':False};last_state={'value':'—'}
+    discovered={};scan_state={'running':False,'stop':None};scan_status=tk.StringVar(value='Поиск ещё не запускался')
 
-    net=ttk.LabelFrame(body,text='Подключение к A1 по LAN',padding=10);net.pack(fill='x')
+    discovery=ttk.LabelFrame(body,text='Bambu-принтеры в локальной сети',padding=10);discovery.pack(fill='x')
+    top_scan=ttk.Frame(discovery);top_scan.pack(fill='x')
+    scan_btn=ttk.Button(top_scan,text='Сканировать Bambu в LAN');scan_btn.pack(side='left')
+    ttk.Label(top_scan,textvariable=scan_status).pack(side='left',padx=10)
+    cols=('name','model','ip','serial','source')
+    printers_tree=ttk.Treeview(discovery,columns=cols,show='headings',height=5,selectmode='browse')
+    for key,title,width in [('name','Имя',145),('model','Модель',85),('ip','IP',110),('serial','Серийный номер',185),('source','Источник',95)]:
+        printers_tree.heading(key,text=title);printers_tree.column(key,width=width,anchor='w',stretch=(key in ('name','serial')))
+    printers_tree.pack(fill='x',pady=(8,0))
+    ttk.Label(discovery,text='Выберите найденный принтер — IP и серийный номер подставятся автоматически. Access code принтер по сети не передаёт.',foreground='#475569',wraplength=760).pack(anchor='w',pady=(5,0))
+
+    net=ttk.LabelFrame(body,text='Подключение к A1 по LAN',padding=10);net.pack(fill='x',pady=(10,0))
     net.columnconfigure(1,weight=1)
     for row,(lab,var,show) in enumerate([('IP принтера',host,''),('Серийный номер',serial,''),('LAN access code',access,'*')]):
         ttk.Label(net,text=lab,width=19).grid(row=row,column=0,sticky='w',pady=3)
@@ -105,6 +118,68 @@ def open_lan_control(app):
     save_contact_btn=ttk.Button(save,text='Ручка: сохранить Z теста как ПЕРВОЕ касание');save_contact_btn.pack(fill='x',pady=2)
     save_press_btn=ttk.Button(save,text='Ручка: сохранить текущий прижим относительно первого касания');save_press_btn.pack(fill='x',pady=2)
     save_knife_btn=ttk.Button(save,text='Нож: сохранить Z теста как рабочую глубину');save_knife_btn.pack(fill='x',pady=2)
+
+    def discovery_key(item):
+        return (str(getattr(item,'serial','') or '').strip().upper() or str(getattr(item,'ip','')).strip())
+    def redraw_discovered():
+        try:
+            printers_tree.delete(*printers_tree.get_children())
+            items=sorted(discovered.values(),key=lambda x:((x.name or '').lower(),x.ip))
+            for idx,item in enumerate(items):
+                iid=f'p{idx}'
+                printers_tree.insert('', 'end', iid=iid, values=(item.name or 'Bambu Lab',item.model or '—',item.ip,item.serial or '—',item.source))
+                printers_tree.set(iid,'source',item.source)
+                printers_tree.item(iid,tags=(discovery_key(item),))
+        except Exception:pass
+    def merge_discovered(item):
+        key=discovery_key(item)
+        old=discovered.get(key)
+        if old is None:
+            old=next((v for v in discovered.values() if v.ip==item.ip),None)
+        if old is not None:
+            if item.serial:old.serial=item.serial
+            if item.name:old.name=item.name
+            if item.model:old.model=item.model
+            if item.version:old.version=item.version
+            if item.source=='SSDP':old.source='SSDP'
+            # Re-key after serial arrives.
+            for k,v in list(discovered.items()):
+                if v is old and k!=discovery_key(old):discovered.pop(k,None)
+            discovered[discovery_key(old)]=old
+        else:
+            discovered[key]=item
+        redraw_discovered()
+    def select_discovered(event=None):
+        sel=printers_tree.selection()
+        if not sel:return
+        vals=printers_tree.item(sel[0],'values')
+        if len(vals)>=4:
+            host.set(str(vals[2]))
+            sn=str(vals[3])
+            if sn and sn!='—':serial.set(sn)
+            try:save_cfg()
+            except Exception:pass
+    def start_scan():
+        if scan_state['running']:return
+        scan_state['running']=True;scan_btn.config(state='disabled');scan_status.set('Поиск: SSDP / UDP 2021…')
+        stop=threading.Event();scan_state['stop']=stop
+        def on_found(item):
+            try:w.after(0,lambda i=item:merge_discovered(i))
+            except Exception:pass
+        def on_phase(phase):
+            try:w.after(0,lambda p=phase:scan_status.set('Поиск: '+p+'…'))
+            except Exception:pass
+        def worker():
+            err=None
+            try:discover_bambu(ssdp_timeout=6.0,on_found=on_found,on_phase=on_phase,stop_event=stop)
+            except Exception as exc:err=exc
+            def finish():
+                scan_state['running']=False;scan_btn.config(state='normal')
+                if err is not None:scan_status.set('Ошибка поиска: '+str(err))
+                else:scan_status.set(f'Найдено: {len(discovered)}. Нажмите для повторного сканирования.')
+            try:w.after(0,finish)
+            except Exception:pass
+        threading.Thread(target=worker,daemon=True).start()
 
     def client():return getattr(app,'_lan_client',None)
     def fmt(v):
@@ -263,11 +338,16 @@ def open_lan_control(app):
     def closed():
         try:save_cfg()
         except Exception:pass
+        stop=scan_state.get('stop')
+        if stop is not None:
+            try:stop.set()
+            except Exception:pass
         disconnect();app._lan_window=None;w.destroy()
 
+    scan_btn.config(command=start_scan);printers_tree.bind('<<TreeviewSelect>>',select_discovered);printers_tree.bind('<Double-1>',select_discovered)
     connect_btn.config(command=connect_now);disconnect_btn.config(command=disconnect);refresh_btn.config(command=refresh_status)
     home_btn.config(command=do_home);manual_home_btn.config(command=manual_home_done)
     for btn,ax,val in axis_buttons:btn.config(command=lambda a=ax,v=val:axis_jog(a,v))
     sync_btn.config(command=do_sync);lower_btn.config(command=lambda:fine_z(-abs(float(fine_step.get()))));raise_btn.config(command=lambda:fine_z(abs(float(fine_step.get()))));line_btn.config(command=test_line)
     save_contact_btn.config(command=save_contact);save_press_btn.config(command=save_press);save_knife_btn.config(command=save_knife)
-    w.protocol('WM_DELETE_WINDOW',closed);poll()
+    w.protocol('WM_DELETE_WINDOW',closed);poll();w.after(250,start_scan)
