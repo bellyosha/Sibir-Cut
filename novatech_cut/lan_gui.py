@@ -3,10 +3,11 @@ from __future__ import annotations
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 from .lan import BambuLanClient, BambuLanError, load_lan_config, save_lan_config
 from .discovery import BambuLanScanner, DiscoveredPrinter
+from .transfer import upload_file, BambuTransferError, UploadCancelled
 
 
 def open_lan_control(app):
@@ -87,6 +88,10 @@ def open_lan_control(app):
 
     candidate_z={'value':None};connecting={'value':False};homing={'active':False,'started':0.0,'seen_busy':False};homed={'value':False};last_state={'value':'—'}
     scanner={'obj':None,'running':False};discovered={};scan_status=tk.StringVar(value='Поиск ещё не запускался')
+    tool_choice=tk.StringVar(value='Ручка' if app.project.material.mode=='Рисование' else 'Нож')
+    offset_step=tk.DoubleVar(value=0.5);ref_x=tk.DoubleVar(value=float(cfg.get('offset_ref_x',128.0)));ref_y=tk.DoubleVar(value=float(cfg.get('offset_ref_y',128.0)))
+    offset_ref={'x':None,'y':None};offset_status=tk.StringVar(value='Offset X/Y ещё не откалиброван в этой сессии')
+    upload_status=tk.StringVar(value='Файл ещё не отправлялся');upload_state={'busy':False,'cancel':None}
 
     net=ttk.LabelFrame(body,text='Подключение к A1 по LAN',padding=10);net.pack(fill='x')
     net.columnconfigure(1,weight=1)
