@@ -17,13 +17,58 @@ def open_lan_control(app):
         except Exception:pass
 
     cfg=load_lan_config();p=app.project.printer
-    w=tk.Toplevel(app);app._lan_window=w;w.title('LAN управление — Bambu Lab A1');w.geometry('840x900');w.minsize(760,700);w.transient(app)
+    w=tk.Toplevel(app);app._lan_window=w;w.title('LAN управление — Bambu Lab A1');w.transient(app)
+    w.resizable(True,True)
+    sw=max(800,int(w.winfo_screenwidth()));sh=max(700,int(w.winfo_screenheight()))
+    initial_w=min(980,max(760,sw-120));initial_h=min(900,max(620,sh-120))
+    w.geometry(f'{initial_w}x{initial_h}')
+    w.minsize(680,520)
+
     outer=ttk.Frame(w,padding=10);outer.pack(fill='both',expand=True)
-    canvas=tk.Canvas(outer,highlightthickness=0);scroll=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview)
-    body=ttk.Frame(canvas);body.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')))
-    canvas.create_window((0,0),window=body,anchor='nw');canvas.configure(yscrollcommand=scroll.set)
-    canvas.pack(side='left',fill='both',expand=True);scroll.pack(side='right',fill='y')
-    body.bind('<Configure>',lambda e:canvas.itemconfigure(canvas.find_all()[0],width=max(720,canvas.winfo_width()-4)) if canvas.find_all() else None)
+    outer.columnconfigure(0,weight=1);outer.rowconfigure(0,weight=1)
+    canvas=tk.Canvas(outer,highlightthickness=0,borderwidth=0)
+    scroll=ttk.Scrollbar(outer,orient='vertical',command=canvas.yview)
+    canvas.grid(row=0,column=0,sticky='nsew');scroll.grid(row=0,column=1,sticky='ns')
+    body=ttk.Frame(canvas)
+    body_window=canvas.create_window((0,0),window=body,anchor='nw')
+    canvas.configure(yscrollcommand=scroll.set)
+
+    def _update_scrollregion(event=None):
+        try:canvas.configure(scrollregion=canvas.bbox('all'))
+        except Exception:pass
+    def _fit_body_width(event):
+        try:canvas.itemconfigure(body_window,width=max(1,int(event.width)))
+        except Exception:pass
+    def _scroll_units(delta):
+        try:
+            first,last=canvas.yview()
+            if first<=0.0 and delta<0:return
+            if last>=1.0 and delta>0:return
+            canvas.yview_scroll(int(delta),'units')
+        except Exception:pass
+    def _mousewheel(event):
+        # Windows/macOS wheel. Keep the whole LAN page scrollable even when
+        # the cursor is over buttons, entries or the printer table.
+        raw=getattr(event,'delta',0)
+        if raw:
+            steps=-max(1,abs(int(raw))//120) if raw>0 else max(1,abs(int(raw))//120)
+            _scroll_units(steps)
+            return 'break'
+    def _linux_wheel(event):
+        num=getattr(event,'num',0)
+        if num==4:_scroll_units(-3)
+        elif num==5:_scroll_units(3)
+        return 'break'
+
+    body.bind('<Configure>',_update_scrollregion)
+    canvas.bind('<Configure>',_fit_body_width)
+    w.bind('<MouseWheel>',_mousewheel,add='+')
+    w.bind('<Button-4>',_linux_wheel,add='+')
+    w.bind('<Button-5>',_linux_wheel,add='+')
+    w.bind('<Prior>',lambda e:(canvas.yview_scroll(-1,'pages'),'break')[1],add='+')
+    w.bind('<Next>',lambda e:(canvas.yview_scroll(1,'pages'),'break')[1],add='+')
+    w.bind('<Home>',lambda e:(canvas.yview_moveto(0.0),'break')[1],add='+')
+    w.bind('<End>',lambda e:(canvas.yview_moveto(1.0),'break')[1],add='+')
 
     host=tk.StringVar(value=str(cfg.get('host','')));serial=tk.StringVar(value=str(cfg.get('serial','')));access=tk.StringVar(value=str(cfg.get('access_code','')))
     remember=tk.BooleanVar(value=bool(cfg.get('remember_access_code',False)))
