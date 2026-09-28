@@ -14,8 +14,18 @@ class PrinterProfile:
     margin_right: float = 5.0
     margin_bottom: float = 5.0
     margin_top: float = 5.0
+    # Physical tool-tip offset relative to the nozzle:
+    # tool_tip = nozzle + offset. Therefore CAM moves the nozzle to
+    # desired_tool_point - offset.
     tool_offset_x: float = 0.0
     tool_offset_y: float = 0.0
+    tool_offset_version: int = 2
+    # Separate persistent calibration for knife and pen. "z" is working Z
+    # for the knife and first-contact Z (without pressure) for the pen.
+    tool_calibrations: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
+        "knife": {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "calibrated": False},
+        "pen": {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "calibrated": False},
+    })
     work_z: float = 0.0
     safe_z: float = 5.0
     # Z calibration v2: work_z means FIRST CONTACT, not drawing pressure.
@@ -61,6 +71,48 @@ class PrinterProfile:
         "; END SIBIR CUT JOB\n"
     )
 
+    @staticmethod
+    def tool_key_for_mode(mode: str) -> str:
+        return "pen" if str(mode or "").strip().lower() == "рисование".lower() else "knife"
+
+    def get_tool_calibration(self, key_or_mode: str) -> Dict[str, Any]:
+        key = key_or_mode if key_or_mode in ("knife", "pen") else self.tool_key_for_mode(key_or_mode)
+        base = {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "calibrated": False}
+        raw = self.tool_calibrations.get(key, {}) if isinstance(self.tool_calibrations, dict) else {}
+        if isinstance(raw, dict):
+            base.update(raw)
+        for k in ("offset_x", "offset_y", "z", "safe_z"):
+            try: base[k] = float(base.get(k, 0.0))
+            except Exception: base[k] = 0.0 if k != "safe_z" else 5.0
+        base["calibrated"] = bool(base.get("calibrated", False))
+        return base
+
+    def set_tool_calibration(
+        self, key: str, *, offset_x=None, offset_y=None, z=None, safe_z=None, calibrated=None
+    ) -> Dict[str, Any]:
+        if key not in ("knife", "pen"):
+            raise ValueError("tool calibration key must be knife or pen")
+        if not isinstance(self.tool_calibrations, dict):
+            self.tool_calibrations = {}
+        cur = self.get_tool_calibration(key)
+        if offset_x is not None: cur["offset_x"] = float(offset_x)
+        if offset_y is not None: cur["offset_y"] = float(offset_y)
+        if z is not None: cur["z"] = float(z)
+        if safe_z is not None: cur["safe_z"] = float(safe_z)
+        if calibrated is not None: cur["calibrated"] = bool(calibrated)
+        self.tool_calibrations[key] = cur
+        return dict(cur)
+
+    def apply_tool_calibration(self, mode: str) -> Dict[str, Any]:
+        key = self.tool_key_for_mode(mode)
+        cur = self.get_tool_calibration(key)
+        self.tool_offset_x = float(cur["offset_x"])
+        self.tool_offset_y = float(cur["offset_y"])
+        self.work_z = float(cur["z"])
+        self.safe_z = float(cur["safe_z"])
+        self.calibrated = bool(cur["calibrated"])
+        return cur
+
     @property
     def safe_bounds(self):
         return (
@@ -77,9 +129,37 @@ class PrinterProfile:
     def from_dict(cls, d: Dict[str, Any]):
         data=dict(d or {})
         had_z_v2=('z_calibration_version' in data and int(data.get('z_calibration_version') or 0)>=2)
+        had_offset_v2=('tool_offset_version' in data and int(data.get('tool_offset_version') or 0)>=2)
+        had_tool_calibrations=isinstance(data.get('tool_calibrations'),dict)
         had_service_v2=('service_wait_version' in data and int(data.get('service_wait_version') or 0)>=2)
         had_service_v3=('service_wait_version' in data and int(data.get('service_wait_version') or 0)>=3)
         obj=cls(**data)
+        if not had_offset_v2:
+            # Up to 0.2.15 the generator added tool_offset to XY, although the
+            # UI described it as "tool tip relative to nozzle". Negate legacy
+            # values so existing physical nozzle trajectories stay unchanged,
+            # then use the physically correct convention from v2 onward.
+            obj.tool_offset_x = -float(obj.tool_offset_x)
+            obj.tool_offset_y = -float(obj.tool_offset_y)
+            obj.tool_offset_version = 2
+        if not had_tool_calibrations and obj.calibrated:
+            legacy = {
+                "offset_x": float(obj.tool_offset_x),
+                "offset_y": float(obj.tool_offset_y),
+                "z": float(obj.work_z),
+                "safe_z": float(obj.safe_z),
+                "calibrated": True,
+            }
+            obj.tool_calibrations = {"knife": dict(legacy), "pen": dict(legacy)}
+        else:
+            # Fill missing keys from defaults without discarding future-safe
+            # dictionary data that older projects may not contain.
+            merged = cls().tool_calibrations
+            if isinstance(obj.tool_calibrations, dict):
+                for key in ("knife", "pen"):
+                    if isinstance(obj.tool_calibrations.get(key), dict):
+                        merged[key].update(obj.tool_calibrations[key])
+            obj.tool_calibrations = merged
         if not had_z_v2:
             # Previous builds stored work_z as an arbitrary pressed working Z.
             # Drawing now derives pressure from a separately calibrated first-contact Z.
