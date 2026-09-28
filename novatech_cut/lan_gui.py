@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from .lan import BambuLanClient, BambuLanError, load_lan_config, save_lan_config
+from .discovery import BambuLanScanner, DiscoveredPrinter
 
 
 def open_lan_control(app):
@@ -40,6 +41,7 @@ def open_lan_control(app):
     candidate_status=tk.StringVar(value='Z теста: —')
 
     candidate_z={'value':None};connecting={'value':False};homing={'active':False,'started':0.0,'seen_busy':False};homed={'value':False};last_state={'value':'—'}
+    scanner={'obj':None,'running':False};discovered={};scan_status=tk.StringVar(value='Поиск ещё не запускался')
 
     net=ttk.LabelFrame(body,text='Подключение к A1 по LAN',padding=10);net.pack(fill='x')
     net.columnconfigure(1,weight=1)
@@ -53,6 +55,22 @@ def open_lan_control(app):
     disconnect_btn=ttk.Button(bar,text='Отключиться');disconnect_btn.pack(side='left',padx=5)
     refresh_btn=ttk.Button(bar,text='Обновить статус');refresh_btn.pack(side='left')
     ttk.Label(bar,textvariable=conn_status).pack(side='left',padx=10)
+
+    scanbox=ttk.LabelFrame(body,text='Принтеры Bambu в локальной сети',padding=10);scanbox.pack(fill='x',pady=(10,0))
+    sbar=ttk.Frame(scanbox);sbar.pack(fill='x')
+    scan_btn=ttk.Button(sbar,text='Сканировать сеть');scan_btn.pack(side='left')
+    stop_scan_btn=ttk.Button(sbar,text='Остановить',state='disabled');stop_scan_btn.pack(side='left',padx=5)
+    use_scan_btn=ttk.Button(sbar,text='Выбрать принтер');use_scan_btn.pack(side='left')
+    ttk.Label(sbar,textvariable=scan_status).pack(side='left',padx=10)
+    cols=('name','model','ip','serial','signal','source')
+    printer_tree=ttk.Treeview(scanbox,columns=cols,show='headings',height=5,selectmode='browse')
+    for key,title,width in [
+        ('name','Имя',140),('model','Модель',150),('ip','IP',110),
+        ('serial','Серийный номер',165),('signal','Сигнал',65),('source','Источник',85)
+    ]:
+        printer_tree.heading(key,text=title);printer_tree.column(key,width=width,anchor='w',stretch=(key in ('name','model','serial')))
+    printer_tree.pack(fill='x',pady=(8,0))
+    ttk.Label(scanbox,text='Access code по сети не передаётся. После выбора принтера введите его один раз вручную или включите «Запомнить access code».',foreground='#475569',wraplength=760).pack(anchor='w',pady=(6,0))
 
     stat=ttk.LabelFrame(body,text='Состояние и координаты',padding=10);stat.pack(fill='x',pady=(10,0))
     ttk.Label(stat,textvariable=printer_status,style='Title.TLabel').pack(anchor='w')
@@ -111,9 +129,14 @@ def open_lan_control(app):
         try:return f'{float(v):.1f}'
         except Exception:return '—'
     def save_cfg():
-        data={'host':host.get().strip(),'serial':serial.get().strip(),'remember_access_code':bool(remember.get()),'test_x':float(test_x.get()),'test_y':float(test_y.get()),'z_step':float(fine_step.get())}
-        if remember.get():data['access_code']=access.get().strip()
+        codes=cfg.get('access_codes',{}) if isinstance(cfg.get('access_codes',{}),dict) else {}
+        sn=serial.get().strip();code=access.get().strip()
+        data={'host':host.get().strip(),'serial':sn,'remember_access_code':bool(remember.get()),'test_x':float(test_x.get()),'test_y':float(test_y.get()),'z_step':float(fine_step.get()),'access_codes':dict(codes)}
+        if remember.get():
+            data['access_code']=code
+            if sn and code:data['access_codes'][sn]=code
         save_lan_config(data)
+        cfg.clear();cfg.update(data)
     def reset_position():
         c=client()
         if c is not None:c.invalidate_position()
@@ -204,6 +227,68 @@ def open_lan_control(app):
             app.checkpoint();app.project.material.work_z=float(z);app.refresh_all()
             messagebox.showinfo('Глубина ножа',f'Сохранена рабочая Z={float(z):.3f} мм.',parent=w)
         except Exception as exc:messagebox.showerror('Глубина ножа',str(exc),parent=w)
+    def _printer_key(p):
+        return str(p.serial or p.ip)
+    def _source_name(source):
+        return 'SSDP' if source=='ssdp' else ('MQTT 8883' if source=='tcp' else str(source or '—'))
+    def add_discovered(p):
+        try:
+            key=_printer_key(p);discovered[key]=p
+            values=(p.name or '—',p.model_name or p.model_code or 'Bambu Lab',p.ip,p.serial or '—',p.signal or '—',_source_name(p.source))
+            if printer_tree.exists(key):printer_tree.item(key,values=values)
+            else:printer_tree.insert('', 'end', iid=key, values=values)
+            real=sum(1 for x in discovered.values() if x.serial)
+            candidates=len(discovered)-real
+            scan_status.set(f'Найдено: {real} Bambu' + (f' + {candidates} кандид.' if candidates else ''))
+        except Exception:pass
+    def scan_finished(items):
+        scanner['running']=False
+        try:scan_btn.config(state='normal');stop_scan_btn.config(state='disabled')
+        except Exception:return
+        real=sum(1 for x in items if x.serial);candidates=len(items)-real
+        if items:
+            scan_status.set(f'Готово: {real} Bambu' + (f', {candidates} кандид. по 8883' if candidates else ''))
+        else:
+            scan_status.set('Ничего не найдено. Проверьте Wi‑Fi/LAN и брандмауэр Windows.')
+    def scan_network():
+        if scanner['running']:return
+        old=scanner.get('obj')
+        if old is not None:
+            try:old.stop()
+            except Exception:pass
+        discovered.clear()
+        for iid in printer_tree.get_children():
+            printer_tree.delete(iid)
+        scanner['running']=True;scan_status.set('Сканирование… до 6 секунд');scan_btn.config(state='disabled');stop_scan_btn.config(state='normal')
+        def found_cb(p):
+            try:app.after(0,lambda pp=p:add_discovered(pp))
+            except Exception:pass
+        def done_cb(items):
+            try:app.after(0,lambda ii=items:scan_finished(ii))
+            except Exception:pass
+        sc=BambuLanScanner(on_printer=found_cb,on_done=done_cb);scanner['obj']=sc
+        threading.Thread(target=lambda:sc.scan(5.5),daemon=True).start()
+    def stop_scan():
+        sc=scanner.get('obj')
+        if sc is not None:
+            try:sc.stop()
+            except Exception:pass
+        scanner['running']=False;scan_btn.config(state='normal');stop_scan_btn.config(state='disabled');scan_status.set('Сканирование остановлено')
+    def use_selected_printer(event=None):
+        sel=printer_tree.selection()
+        if not sel:return
+        p=discovered.get(sel[0])
+        if p is None:return
+        host.set(p.ip)
+        if p.serial:
+            serial.set(p.serial)
+            codes=cfg.get('access_codes',{}) if isinstance(cfg.get('access_codes',{}),dict) else {}
+            if p.serial in codes and codes[p.serial]:access.set(str(codes[p.serial]))
+            scan_status.set(f'Выбран: {p.display_name()} • {p.ip}')
+        else:
+            scan_status.set(f'Выбран IP {p.ip}; SSDP не сообщил серийный номер — введите SN вручную.')
+        try:save_cfg()
+        except Exception:pass
     def refresh_status():
         c=client()
         if c is not None and c.connected:
@@ -263,11 +348,16 @@ def open_lan_control(app):
     def closed():
         try:save_cfg()
         except Exception:pass
+        sc=scanner.get('obj')
+        if sc is not None:
+            try:sc.stop()
+            except Exception:pass
         disconnect();app._lan_window=None;w.destroy()
 
     connect_btn.config(command=connect_now);disconnect_btn.config(command=disconnect);refresh_btn.config(command=refresh_status)
+    scan_btn.config(command=scan_network);stop_scan_btn.config(command=stop_scan);use_scan_btn.config(command=use_selected_printer);printer_tree.bind('<Double-1>',use_selected_printer)
     home_btn.config(command=do_home);manual_home_btn.config(command=manual_home_done)
     for btn,ax,val in axis_buttons:btn.config(command=lambda a=ax,v=val:axis_jog(a,v))
     sync_btn.config(command=do_sync);lower_btn.config(command=lambda:fine_z(-abs(float(fine_step.get()))));raise_btn.config(command=lambda:fine_z(abs(float(fine_step.get()))));line_btn.config(command=test_line)
     save_contact_btn.config(command=save_contact);save_press_btn.config(command=save_press);save_knife_btn.config(command=save_knife)
-    w.protocol('WM_DELETE_WINDOW',closed);poll()
+    w.protocol('WM_DELETE_WINDOW',closed);poll();w.after(350,scan_network)
