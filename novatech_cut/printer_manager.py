@@ -65,6 +65,24 @@ def _access_for(cfg: dict[str, Any], serial: str) -> str:
     return str(cfg.get("access_code") or "").strip()
 
 
+def _load_tool_calibrations(app, cfg: dict[str, Any], serial: str) -> None:
+    store=cfg.get("tool_calibrations")
+    if not isinstance(store,dict) or not serial:
+        return
+    per=store.get(serial)
+    if not isinstance(per,dict):
+        return
+    changed=False
+    for key in ("knife","pen"):
+        raw=per.get(key)
+        if isinstance(raw,dict):
+            app.project.printer.tool_calibrations[key]=dict(raw);changed=True
+    if changed:
+        app.apply_active_tool_calibration()
+        try:app.after(0,app.refresh_all)
+        except Exception:pass
+
+
 def _status(app,text,kind="idle"):
     try:
         app.after(0,lambda:app.set_printer_status(text,kind))
@@ -121,7 +139,8 @@ def connect_printer(app, record: dict[str,str], access_code: str, *, remember: b
         client.connect(timeout=6.0)
         app._lan_client=client
         cfg=load_lan_config()
-        _save_printer_record(cfg,record,code,remember)
+        cfg=_save_printer_record(cfg,record,code,remember)
+        _load_tool_calibrations(app,cfg,serial)
         _status(app,f"{record.get('name') or 'Bambu A1'} • {host} • подключен","ok")
         return True
     except Exception as exc:
