@@ -257,13 +257,46 @@ def open_lan_control(app):
         except Exception:return '—'
     def save_cfg():
         codes=cfg.get('access_codes',{}) if isinstance(cfg.get('access_codes',{}),dict) else {}
+        tools=cfg.get('tool_calibrations',{}) if isinstance(cfg.get('tool_calibrations',{}),dict) else {}
         sn=serial.get().strip();code=access.get().strip()
-        data={'host':host.get().strip(),'serial':sn,'remember_access_code':bool(remember.get()),'test_x':float(test_x.get()),'test_y':float(test_y.get()),'z_step':float(fine_step.get()),'access_codes':dict(codes)}
+        data={
+            'host':host.get().strip(),'serial':sn,'remember_access_code':bool(remember.get()),
+            'test_x':float(test_x.get()),'test_y':float(test_y.get()),'z_step':float(fine_step.get()),
+            'offset_ref_x':float(ref_x.get()),'offset_ref_y':float(ref_y.get()),
+            'access_codes':dict(codes),'tool_calibrations':dict(tools)
+        }
         if remember.get():
             data['access_code']=code
             if sn and code:data['access_codes'][sn]=code
         save_lan_config(data)
         cfg.clear();cfg.update(data)
+    def selected_tool_key():
+        return 'pen' if tool_choice.get()=='Ручка' else 'knife'
+    def selected_tool_name():
+        return 'ручка' if selected_tool_key()=='pen' else 'нож'
+    def persist_tool_calibration(key):
+        sn=serial.get().strip()
+        if not sn:return
+        store=cfg.get('tool_calibrations',{}) if isinstance(cfg.get('tool_calibrations',{}),dict) else {}
+        store=dict(store);per=dict(store.get(sn,{}) or {});per[key]=app.project.printer.get_tool_calibration(key);store[sn]=per
+        cfg['tool_calibrations']=store;save_cfg()
+    def load_saved_tool_calibrations():
+        sn=serial.get().strip()
+        if not sn:return
+        store=cfg.get('tool_calibrations',{}) if isinstance(cfg.get('tool_calibrations',{}),dict) else {}
+        per=store.get(sn,{}) if isinstance(store.get(sn,{}),dict) else {}
+        changed=False
+        for key in ('knife','pen'):
+            raw=per.get(key)
+            if isinstance(raw,dict):
+                app.project.printer.tool_calibrations[key]=dict(raw);changed=True
+        if changed:
+            app.apply_active_tool_calibration();app.refresh_all()
+    def update_offset_status():
+        key=selected_tool_key();cur=app.project.printer.get_tool_calibration(key)
+        xy='OK' if cur.get('xy_calibrated') else 'нет'
+        zz='OK' if cur.get('z_calibrated') else 'нет'
+        offset_status.set(f"{selected_tool_name().capitalize()}: Offset X={cur['offset_x']:.3f}, Y={cur['offset_y']:.3f} мм • XY {xy} • Z {zz}")
     def reset_position():
         c=client()
         if c is not None:c.invalidate_position()
