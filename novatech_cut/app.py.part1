@@ -4,7 +4,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from pathlib import Path
 from .models import Project, SceneObject, DEFAULT_MATERIALS, MaterialProfile
 from .pipeline import import_paths, prepare_paths, detect_import_kind
-from .geometry import bbox, path_length, transformed_paths
+from .geometry import bbox, path_length, transformed_paths, object_world_center, set_object_transform_about_center
 from .gcode import generate_gcode, GCodeError, analyze_path_bounds
 from .pack3mf import build_gcode_3mf, build_orca_preview_3mf
 from .projectio import save_project, load_project
@@ -21,7 +21,7 @@ class App(tk.Tk):
         super().__init__(); self.title(APP_TITLE); self.geometry('1460x900'); self.minsize(1120,700);self.configure(bg='#eef2f5')
         self.project=Project();self.current_file=None;self.zoom=2.2;self.origin=(28,28);self.history=[];self.future=[]
         self.prepared_paths=[];self.prepare_error=None;self._busy=False;self._busy_win=None
-        self._drag=None;self._drag_active=False;self.last_export_path=None
+        self._drag=None;self._drag_active=False;self._transform_handle_radius=12;self.last_export_path=None
         self._lan_window=None;self._lan_client=None;self._printer_manager_window=None;self._calibration_wizard_window=None;self._job_settings_window=None
         self._printer_status_kind='idle';self._printer_status_value='Принтер не подключен'
         self._style();self._build();self.refresh_all();self.protocol('WM_DELETE_WINDOW',self._close_app)
@@ -99,11 +99,12 @@ class App(tk.Tk):
         canvas_shell=tk.Frame(center,bg='#ffffff',highlightthickness=1,highlightbackground='#dbe3ea')
         canvas_shell.pack(fill='both',expand=True)
         canvas_top=tk.Frame(canvas_shell,bg='#ffffff',height=44);canvas_top.pack(fill='x');canvas_top.pack_propagate(False)
-        tk.Label(canvas_top,text='Рабочий стол A1  •  256 × 256 мм',bg='#ffffff',fg='#334155',font=('Segoe UI',10,'bold')).pack(side='left',padx=12)
+        tk.Label(canvas_top,text='Рабочий стол A1  •  256 × 256 мм',bg='#ffffff',fg='#334155',font=('Segoe UI',10,'bold')).pack(side='left',padx=(12,8))
+        tk.Label(canvas_top,text='перетащить • ○ повернуть • ■ размер',bg='#ffffff',fg='#94a3b8',font=('Segoe UI',9)).pack(side='left')
         ttk.Button(canvas_top,text='−',width=3,command=lambda:self.set_zoom(self.zoom/1.2)).pack(side='right',padx=(2,8),pady=7)
         ttk.Button(canvas_top,text='+',width=3,command=lambda:self.set_zoom(self.zoom*1.2)).pack(side='right',pady=7)
         self.canvas=tk.Canvas(canvas_shell,bg='#f7f9fb',highlightthickness=0)
-        self.canvas.pack(fill='both',expand=True,padx=1,pady=(0,1));self.canvas.bind('<Configure>',lambda e:self.draw());self.canvas.bind('<MouseWheel>',self.on_wheel);self.canvas.bind('<Button-1>',self.on_canvas_press);self.canvas.bind('<B1-Motion>',self.on_canvas_drag);self.canvas.bind('<ButtonRelease-1>',self.on_canvas_release)
+        self.canvas.pack(fill='both',expand=True,padx=1,pady=(0,1));self.canvas.bind('<Configure>',lambda e:self.draw());self.canvas.bind('<MouseWheel>',self.on_wheel);self.canvas.bind('<Button-1>',self.on_canvas_press);self.canvas.bind('<B1-Motion>',self.on_canvas_drag);self.canvas.bind('<ButtonRelease-1>',self.on_canvas_release);self.canvas.bind('<Motion>',self.on_canvas_hover)
 
         right=RoundedPanel(work,width=330,radius=18,fill='#ffffff',outline='#dde3e9',pad=16,parent_bg='#eef2f5')
         right.pack(side='right',fill='y');right.pack_propagate(False)
@@ -207,6 +208,8 @@ class App(tk.Tk):
         if i is None:return
         o=self.project.objects[i]
         for k in ('x','y','scale','rotation'):self.vars[k].set(getattr(o,'rotation_deg' if k=='rotation' else k))
+        try:self.draw()
+        except Exception:pass
     def checkpoint(self):
         self.history.append(copy.deepcopy(self.project));self.history=self.history[-50:];self.future.clear()
     def undo(self):
