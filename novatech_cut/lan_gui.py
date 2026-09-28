@@ -422,26 +422,43 @@ def open_lan_control(app):
         except Exception as exc:messagebox.showerror('Тестовая линия',str(exc),parent=w)
     def save_contact():
         try:
+            if selected_tool_key()!='pen':raise BambuLanError('В поле «Калибруем» выберите «Ручка».')
             z=candidate_z['value']
             if z is None:raise BambuLanError('Z теста ещё не выбрана')
-            app.checkpoint();app.project.printer.work_z=float(z);app.project.material.work_z=float(z);app.refresh_all()
-            messagebox.showinfo('Калибровка ручки',f'Первое касание сохранено: Z={float(z):.3f} мм.',parent=w)
+            app.checkpoint();cur=app.project.printer.get_tool_calibration('pen')
+            app.project.printer.set_tool_calibration('pen',z=float(z),safe_z=max(float(cur['safe_z']),float(z)+1.0),z_calibrated=True)
+            persist_tool_calibration('pen')
+            if app.project.material.mode=='Рисование':
+                app.apply_active_tool_calibration();app.project.material.work_z=float(z)
+            app.refresh_all();update_offset_status()
+            ready_text='Профиль ручки полностью готов.' if app.project.printer.get_tool_calibration('pen').get('calibrated') else 'Z сохранена; для полного профиля ещё нужен Offset X/Y.'
+            messagebox.showinfo('Калибровка ручки',f'Первое касание сохранено: Z={float(z):.3f} мм.\n{ready_text}',parent=w)
         except Exception as exc:messagebox.showerror('Калибровка ручки',str(exc),parent=w)
     def save_press():
         try:
+            if selected_tool_key()!='pen':raise BambuLanError('В поле «Калибруем» выберите «Ручка».')
             z=candidate_z['value']
             if z is None:raise BambuLanError('Z теста ещё не выбрана')
-            contact=float(app.project.printer.work_z);press=contact-float(z)
+            pen=app.project.printer.get_tool_calibration('pen')
+            if not pen.get('z_calibrated'):raise BambuLanError('Сначала сохраните Z первого касания ручки.')
+            contact=float(pen['z']);press=contact-float(z)
             if not (0.0<=press<=0.5):raise BambuLanError(f'Получился прижим {press:.3f} мм. Допустимый диапазон 0…0,5 мм.')
             app.checkpoint();app.project.material.drawing_press_depth=press;app.refresh_all()
-            messagebox.showinfo('Прижим ручки',f'Сохранён прижим {press:.3f} мм.',parent=w)
+            messagebox.showinfo('Прижим ручки',f'Сохранён прижим {press:.3f} мм для текущего задания/материала.',parent=w)
         except Exception as exc:messagebox.showerror('Прижим ручки',str(exc),parent=w)
     def save_knife():
         try:
+            if selected_tool_key()!='knife':raise BambuLanError('В поле «Калибруем» выберите «Нож».')
             z=candidate_z['value']
             if z is None:raise BambuLanError('Z теста ещё не выбрана')
-            app.checkpoint();app.project.material.work_z=float(z);app.refresh_all()
-            messagebox.showinfo('Глубина ножа',f'Сохранена рабочая Z={float(z):.3f} мм.',parent=w)
+            app.checkpoint();cur=app.project.printer.get_tool_calibration('knife')
+            app.project.printer.set_tool_calibration('knife',z=float(z),safe_z=max(float(cur['safe_z']),float(z)+1.0),z_calibrated=True)
+            persist_tool_calibration('knife')
+            if app.project.material.mode!='Рисование':
+                app.apply_active_tool_calibration();app.project.material.work_z=float(z)
+            app.refresh_all();update_offset_status()
+            ready_text='Профиль ножа полностью готов.' if app.project.printer.get_tool_calibration('knife').get('calibrated') else 'Z сохранена; для полного профиля ещё нужен Offset X/Y.'
+            messagebox.showinfo('Глубина ножа',f'Сохранена рабочая Z={float(z):.3f} мм.\n{ready_text}',parent=w)
         except Exception as exc:messagebox.showerror('Глубина ножа',str(exc),parent=w)
     def _printer_key(p):
         return str(p.serial or p.ip)
