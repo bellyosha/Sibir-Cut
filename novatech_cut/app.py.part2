@@ -42,10 +42,10 @@
     def select_material(self):
         name=self.material_var.get();m=next((x for x in DEFAULT_MATERIALS if x.name==name),None)
         if m:
-            self.project.material=MaterialProfile.from_dict(m.to_dict());self.refresh_all()
+            self.project.material=MaterialProfile.from_dict(m.to_dict());self.apply_active_tool_calibration();self.refresh_all()
     def apply_job_settings(self):
         try:
-            self.sync_material();self.refresh_all()
+            self.sync_material();self.apply_active_tool_calibration();self.refresh_all()
         except Exception as exc:
             messagebox.showerror('Параметры',str(exc),parent=self)
     def on_mode_changed(self):
@@ -53,16 +53,34 @@
     def sync_material(self):
         m=self.project.material;m.mode=self.mode.get();m.passes=max(1,self.passes.get());m.work_speed=max(0.1,self.work_speed.get());m.travel_speed=max(0.1,self.travel_speed.get());m.work_z=self.work_z.get();m.safe_z=self.safe_z.get();m.blade_offset=max(0,self.blade_offset.get());m.overcut=max(0,self.overcut.get())
         m.drawing_style=self.drawing_style.get() or 'Контур + заливка';m.fill_spacing=max(0.1,self.fill_spacing.get());m.fill_angle=self.fill_angle.get();m.fill_crosshatch=bool(self.fill_crosshatch.get());m.fill_inset=max(0.0,self.fill_inset.get());m.drawing_press_depth=max(0.0,self.pen_press.get());m.drawing_lift_height=max(0.0,self.pen_lift.get())
+    def apply_active_tool_calibration(self):
+        p=self.project.printer;m=self.project.material
+        cur=p.apply_tool_calibration(m.mode)
+        if cur.get('calibrated'):
+            # Drawing always uses calibrated first-contact Z. Cutting may keep
+            # a material-specific Z; zero means use the calibrated knife Z.
+            if m.mode=='Рисование':
+                m.work_z=float(cur['z'])
+            elif abs(float(m.work_z or 0.0))<1e-9:
+                m.work_z=float(cur['z'])
+            m.safe_z=max(float(m.safe_z),float(cur['safe_z']))
+        return cur
     def refresh_fields(self):
         m=self.project.material;self.material_var.set(m.name);self.mode.set(m.mode);self.passes.set(m.passes);self.work_speed.set(m.work_speed);self.travel_speed.set(m.travel_speed);self.work_z.set(m.work_z);self.safe_z.set(m.safe_z);self.blade_offset.set(m.blade_offset);self.overcut.set(m.overcut)
         self.drawing_style.set(getattr(m,'drawing_style','Контур + заливка'));self.fill_spacing.set(getattr(m,'fill_spacing',1.0));self.fill_angle.set(getattr(m,'fill_angle',45.0));self.fill_crosshatch.set(bool(getattr(m,'fill_crosshatch',False)));self.fill_inset.set(getattr(m,'fill_inset',0.2));self.pen_press.set(getattr(m,'drawing_press_depth',0.10));self.pen_lift.set(getattr(m,'drawing_lift_height',5.0))
-        self.calib_label.config(text='Профиль A1: ОТКАЛИБРОВАН' if self.project.printer.calibrated else 'Профиль A1: НЕ ОТКАЛИБРОВАН — экспорт заблокирован',foreground='#15803d' if self.project.printer.calibrated else '#b91c1c')
+        tool='РУЧКА' if m.mode=='Рисование' else 'НОЖ'
+        p=self.project.printer
+        if p.calibrated:
+            self.calib_label.config(text=f'{tool}: калибровка применена • Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}, Z={p.work_z:.3f}',foreground='#15803d')
+        else:
+            self.calib_label.config(text=f'{tool}: НЕТ КАЛИБРОВКИ — экспорт заблокирован',foreground='#b91c1c')
     def _rebuild_prepared(self):
         try:
             self.prepared_paths=prepare_paths(self.project.objects,self.project.material);self.prepare_error=None
         except Exception as exc:
             self.prepared_paths=[];self.prepare_error=str(exc)
     def refresh_all(self):
+        self.apply_active_tool_calibration()
         sel=self.current_index();self._rebuild_prepared();self.listbox.delete(0,'end');[self.listbox.insert('end',o.name) for o in self.project.objects]
         if sel is not None and sel<len(self.project.objects):self.listbox.selection_set(sel);self.listbox.activate(sel)
         self.refresh_fields();self.draw();self.update_status()
@@ -90,11 +108,14 @@
         x,y=self._canvas_to_bed(event.x,event.y);sx,sy=self._drag['start_pointer'];ox0,oy0=self._drag['start_xy'];o=self.project.objects[i]
         o.x=ox0+(x-sx);o.y=oy0+(y-sy)
         x0,y0,x1,y1=self._object_bounds(o);p=self.project.printer;l,b,r,t=p.safe_bounds
-        tx0=x0+p.tool_offset_x;ty0=y0+p.tool_offset_y;tx1=x1+p.tool_offset_x;ty1=y1+p.tool_offset_y
-        if tx0<l:o.x+=l-tx0
-        if tx1>r:o.x-=tx1-r
-        if ty0<b:o.y+=b-ty0
-        if ty1>t:o.y-=ty1-t
+        # Geometry is the tool-tip path. The nozzle follows tool-offset, so
+        # clamp the object to the intersection of tool-safe and nozzle-physical bounds.
+        xl=max(l,float(p.tool_offset_x));xr=min(r,float(p.bed_width)+float(p.tool_offset_x))
+        yb=max(b,float(p.tool_offset_y));yt=min(t,float(p.bed_height)+float(p.tool_offset_y))
+        if x0<xl:o.x+=xl-x0
+        if x1>xr:o.x-=x1-xr
+        if y0<yb:o.y+=yb-y0
+        if y1>yt:o.y-=y1-yt
         self.vars['x'].set(round(o.x,3));self.vars['y'].set(round(o.y,3));self.draw()
     def on_canvas_release(self,event):
         if not self._drag:return
