@@ -144,6 +144,25 @@ def _drawing_fill_regression_test() -> None:
     if len(prepared)<=2:
         raise RuntimeError('Drawing pipeline did not add fill paths')
 
+def _mirror_job_regression_test() -> None:
+    project=Project()
+    project.material.blade_offset=0.0
+    project.material.overcut=0.0
+    project.objects=[SceneObject('asymmetric',[[(0.0,0.0),(10.0,0.0),(2.0,5.0)]])]
+    project.material.mirror_x=False
+    normal=prepare_paths(project.objects,project.material)
+    project.material.mirror_x=True
+    mirrored=prepare_paths(project.objects,project.material)
+    if not normal or not mirrored:
+        raise RuntimeError('Mirror regression produced no paths')
+    if len(normal[0])!=len(mirrored[0]):
+        raise RuntimeError('Mirror regression changed path length')
+    x0=min(x for p in normal for x,_ in p);x1=max(x for p in normal for x,_ in p)
+    expected=[(x0+x1-x,y) for x,y in normal[0]]
+    for got,want in zip(mirrored[0],expected):
+        if abs(got[0]-want[0])>1e-6 or abs(got[1]-want[1])>1e-6:
+            raise RuntimeError('Whole-job horizontal mirror is incorrect')
+
 def _bounds_regression_test() -> None:
     project=Project();project.printer.calibrated=True
     good=[[(10.0,10.0),(40.0,10.0),(40.0,40.0)]]
@@ -328,6 +347,7 @@ def run_self_test() -> None:
         _transparent_png_thread_regression_test(td)
         _centerline_completeness_regression_test()
         _drawing_fill_regression_test()
+        _mirror_job_regression_test()
         _bounds_regression_test()
         _tool_calibration_regression_test()
         _drawing_z_safety_regression_test()
