@@ -32,10 +32,10 @@ def open_job_settings(app):
     def material_changed(event=None):
         name=app.material_var.get();m=next((x for x in DEFAULT_MATERIALS if x.name==name),None)
         if m:
-            mode=app.mode.get()
+            mode=app.mode.get();mirror=bool(app.mirror_job.get())
             app.project.material=MaterialProfile.from_dict(m.to_dict())
-            # Explicit main-screen mode wins over the preset's default mode.
-            app.project.material.mode=mode
+            # Explicit main-screen mode/orientation wins over preset defaults.
+            app.project.material.mode=mode;app.project.material.mirror_x=mirror
             app.refresh_all()
     cb.bind("<<ComboboxSelected>>",material_changed)
 
@@ -58,6 +58,10 @@ def open_job_settings(app):
     ]:
         row=ttk.Frame(draw);row.pack(fill="x",pady=3);ttk.Label(row,text=lab).pack(side="left");ttk.Entry(row,textvariable=var,width=16).pack(side="right")
     ttk.Checkbutton(draw,text="Перекрёстная штриховка (+90°)",variable=app.fill_crosshatch).pack(anchor="w",pady=(6,0))
+
+    orient=ttk.LabelFrame(body,text="Ориентация",padding=10);orient.pack(fill="x",pady=(0,10))
+    ttk.Checkbutton(orient,text="Зеркально / наизнанку",variable=app.mirror_job,command=app.toggle_job_mirror).pack(anchor="w")
+    ttk.Label(orient,text="Отражается вся траектория по горизонтали. Исходный файл и положение объекта не изменяются.",style="Muted.TLabel",wraplength=460).pack(anchor="w",pady=(4,0))
 
     ttk.Label(body,text="Z из калибровки применяется автоматически. Изменение Z здесь оставлено для осознанной ручной корректировки текущего задания.",style="Muted.TLabel",wraplength=480).pack(anchor="w",pady=(2,12))
     bar=ttk.Frame(body);bar.pack(fill="x",pady=(4,12))
