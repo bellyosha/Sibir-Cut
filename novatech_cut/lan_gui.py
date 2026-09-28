@@ -14,10 +14,14 @@ def upload_path_via_lan(app, path, parent=None, on_done=None):
     """Upload an already generated G-code to the connected printer over FTPS."""
     parent=parent or app
     client=getattr(app,'_lan_client',None)
-    if client is None or not getattr(client,'connected',False):
-        messagebox.showerror('Отправка по LAN','Сначала подключитесь к принтеру в окне «LAN управление».',parent=parent)
+    if client is not None and getattr(client,'connected',False):
+        upload_host=str(client.host or '').strip();upload_code=str(client.access_code or '').strip()
+    else:
+        saved=load_lan_config();upload_host=str(saved.get('host','') or '').strip();upload_code=str(saved.get('access_code','') or '').strip()
+    if not upload_host or not upload_code:
+        messagebox.showerror('Отправка по LAN','Нет сохранённых данных подключения. Откройте «LAN управление», выберите принтер, введите access code и включите «Запомнить access code».',parent=parent)
         if on_done:
-            try:on_done(None,'Нет подключения к принтеру')
+            try:on_done(None,'Нет сохранённых данных подключения')
             except Exception:pass
         return False
     if getattr(app,'_lan_upload_busy',False):
@@ -38,7 +42,7 @@ def upload_path_via_lan(app, path, parent=None, on_done=None):
         except Exception:pass
     def worker():
         result=None;err=None
-        try:result=upload_file(client.host,client.access_code,path,progress=progress,cancel=cancel)
+        try:result=upload_file(upload_host,upload_code,path,progress=progress,cancel=cancel)
         except Exception as exc:err=exc
         def finish():
             app._lan_upload_busy=False;app._lan_upload_cancel=None
