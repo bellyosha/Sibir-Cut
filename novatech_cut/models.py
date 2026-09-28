@@ -174,9 +174,19 @@ class PrinterProfile:
             obj.tool_calibrations = merged
         if not had_z_v2:
             # Previous builds stored work_z as an arbitrary pressed working Z.
-            # Drawing now derives pressure from a separately calibrated first-contact Z.
+            # Keep legacy XY information, but force Z re-calibration so an old
+            # pressed Z cannot be mistaken for first-contact / knife working Z.
             obj.calibrated=False
             obj.z_calibration_version=2
+            for key in ("knife","pen"):
+                cur=obj.get_tool_calibration(key)
+                obj.set_tool_calibration(
+                    key,
+                    offset_x=cur["offset_x"],offset_y=cur["offset_y"],
+                    z=cur["z"],safe_z=cur["safe_z"],
+                    xy_calibrated=cur.get("xy_calibrated",False),
+                    z_calibrated=False,
+                )
 
         # Migrate the old Novatech Cut default profile. Older builds parked at
         # X20/Y240 and executed G28 inside the print job. On A1 this is a poor
