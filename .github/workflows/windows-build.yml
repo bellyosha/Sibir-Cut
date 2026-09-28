@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 concurrency:
   group: novatech-cut-windows-build
@@ -133,7 +134,21 @@ jobs:
             "$($h.Hash.ToLower())  $_"
           } | Set-Content dist/SHA256SUMS-WINDOWS.txt
 
+      - name: Free old Actions artifact storage
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $ids = gh api "repos/$repo/actions/artifacts?per_page=100" --paginate --jq '.artifacts[] | select(.expired == false) | .id'
+          foreach ($id in $ids) {
+            Write-Host "Deleting old Actions artifact $id"
+            gh api --method DELETE "repos/$repo/actions/artifacts/$id"
+          }
+
       - name: Upload Windows artifacts
+        id: upload_windows
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Sibir-Cut-Windows-v0.2.14
@@ -144,3 +159,17 @@ jobs:
             dist/Sibir_Cut_Portable_Windows_x64.zip
             dist/Sibir_Cut_v0.2.14_SOURCE.zip
             dist/SHA256SUMS-WINDOWS.txt
+
+      - name: Publish release fallback
+        if: steps.upload_windows.outcome == 'failure'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v0.2.14"
+          $repo = "${{ github.repository }}"
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $repo --target "${{ github.sha }}" --title "Sibir Cut 0.2.14" --notes "Windows build 0.2.14. Actions artifact storage fallback."
+          }
+          gh release upload $tag --repo $repo dist/Sibir_Cut_Setup_0.2.14_x64.exe dist/Sibir_Cut_Portable_Windows_x64.zip dist/Sibir_Cut_v0.2.14_SOURCE.zip dist/SHA256SUMS-WINDOWS.txt --clobber
