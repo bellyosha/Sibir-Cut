@@ -6,7 +6,7 @@
         fields=[('name','Название'),('bed_width','Ширина поля, мм'),('bed_height','Высота поля, мм'),('margin_left','Отступ слева'),('margin_right','Отступ справа'),('margin_bottom','Отступ снизу'),('margin_top','Отступ сверху'),('park_x','Парковка установки X'),('park_y','Парковка установки Y'),('install_wait_seconds','Ожидание установки UMTS, сек'),('remove_wait_seconds','Ожидание снятия UMTS, сек'),('max_work_speed','Макс. рабочая скорость'),('max_travel_speed','Макс. холостая скорость'),('max_accel','Макс. ускорение'),('min_z','Минимальный Z'),('max_z','Максимальный Z')]
         for key,lab in fields:
             r=ttk.Frame(inner);r.pack(fill='x',pady=2);ttk.Label(r,text=lab,width=29).pack(side='left');v=tk.StringVar(value=str(getattr(p,key)));ttk.Entry(r,textvariable=v).pack(side='left',fill='x',expand=True);vals[key]=v
-        ttk.Label(inner,text='Offset X/Y и Z теперь настраиваются отдельно для ножа и ручки через «LAN управление» / «Калибровка» и применяются автоматически.',foreground='#475569',wraplength=700).pack(fill='x',anchor='w',pady=(8,4))
+        ttk.Label(inner,text='Offset X/Y и Z настраиваются отдельно для ножа и ручки через новый пошаговый мастер «Калибровка» и применяются автоматически.',foreground='#475569',wraplength=700).pack(fill='x',anchor='w',pady=(8,4))
         ttk.Label(inner,text='Стартовый G-code',style='Title.TLabel').pack(anchor='w',pady=(10,2));start=tk.Text(inner,height=12,wrap='none');start.pack(fill='x');start.insert('1.0',p.start_template)
         ttk.Label(inner,text='Конечный G-code',style='Title.TLabel').pack(anchor='w',pady=(10,2));end=tk.Text(inner,height=9,wrap='none');end.pack(fill='x');end.insert('1.0',p.end_template)
         bar=ttk.Frame(inner);bar.pack(fill='x',pady=10)
@@ -100,7 +100,7 @@
                 if self.project.objects:note(f'✓ Загружено объектов: {len(self.project.objects)}','ok')
                 else:note('Файл ещё не загружен. Нажмите «Импорт» в главном окне или кнопку ниже.','bad')
                 ttk.Button(body,text='Импортировать файл…',command=self.do_import).pack(anchor='w',pady=10)
-                note('Для растровой картинки выбирайте «Нет» на вопрос про осевые линии, если нужно вырезать контур или полностью закрашивать фигуру.')
+                note('Для растровой картинки Sibir Cut сразу строит обычную геометрию/контуры — отдельного вопроса про центральные линии больше нет.')
             elif i==1:
                 desc.config(text='Разместите объект на столе. Теперь его можно хватать левой кнопкой мыши прямо в главном координатном поле и перетаскивать.')
                 ok,msg=self._placement_ok();note(('✓ ' if ok else '⚠ ')+msg,'ok' if ok else 'warn')
@@ -128,8 +128,8 @@
                 p=self.project.printer;tool='ручки' if self.project.material.mode=='Рисование' else 'ножа';cur=p.get_tool_calibration(self.project.material.mode)
                 if p.calibrated:note(f"✓ Профиль {tool} готов. Offset X={p.tool_offset_x:.3f}, Y={p.tool_offset_y:.3f}; Z={p.work_z:.3f}; безопасная Z={p.safe_z:.3f}.",'ok')
                 else:note(f"Профиль {tool} не завершён: XY={'OK' if cur.get('xy_calibrated') else 'нет'}, Z={'OK' if cur.get('z_calibrated') else 'нет'}. Экспорт заблокирован.",'bad')
-                note('Рекомендуемый способ: «LAN управление» → Home с UMTS снятым → калибровка Offset по общей метке сопла/инструмента → точная настройка Z.\n\nOffset хранится физически: КОНЧИК = СОПЛО + OFFSET. Знак вычисляет программа. Для ручки Z — первое касание без нажима, а прижим задаётся отдельно.')
-                ttk.Button(body,text='Открыть LAN-калибровку',command=lambda:open_lan_control(self)).pack(anchor='w',pady=8);ttk.Button(body,text='Ручной ввод калибровки',command=self.calibrate).pack(anchor='w',pady=4);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
+                note('Рекомендуемый способ: «Калибровка» → Home с UMTS снятым → безопасная Z → рабочая/контактная Z → совмещение инструмента с опорной меткой.\n\nOffset хранится физически: КОНЧИК = СОПЛО + OFFSET. Знак вычисляет программа. Для ручки Z — первое касание без нажима, а прижим задаётся отдельно.')
+                ttk.Button(body,text='Открыть пошаговую калибровку',command=lambda:open_calibration_wizard(self)).pack(anchor='w',pady=8);ttk.Button(body,text='Ручной ввод калибровки',command=self.calibrate).pack(anchor='w',pady=4);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
             else:
                 desc.config(text='Создаётся прямой .gcode для A1. Его можно сохранить на ПК или сразу передать выбранному A1 по локальной сети.')
                 note('LAN-передача идёт напрямую на принтер по FTPS/TLS. Sibir Cut загружает файл в cache и проверяет завершение передачи. Автоматический старт задания пока не выполняется — запускайте загруженный файл на экране A1. microSD остаётся запасным способом.')
