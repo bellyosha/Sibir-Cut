@@ -331,7 +331,7 @@ class SceneObject:
 class Project:
     version: int = 1
     printer: PrinterProfile = field(default_factory=PrinterProfile)
-    material: MaterialProfile = field(default_factory=lambda: DEFAULT_MATERIALS[0])
+    material: MaterialProfile = field(default_factory=lambda: MaterialProfile.from_dict(DEFAULT_MATERIALS[0].to_dict()))
     objects: List[SceneObject] = field(default_factory=list)
     notes: str = ""
 
