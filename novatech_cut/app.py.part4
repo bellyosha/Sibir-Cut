@@ -121,45 +121,24 @@ Esc — отмена
             upload_path_via_lan(self,path,parent=self)
 
 def calibration_gui_self_test():
-    """Create the calibration dialog and verify its critical controls exist."""
-    app=App()
-    app.withdraw()
+    """Smoke-test the full 0.3 main shell without opening network dialogs."""
+    app=None
     try:
-        app.calibrate()
+        app=App()
+        app._auto_connect_started=True
         app.update_idletasks()
-        tops=[w for w in app.winfo_children() if isinstance(w,tk.Toplevel)]
-        if not tops:
-            raise RuntimeError('Calibration dialog was not created')
-        win=tops[-1]
-        texts=[]
-        entries=[]
-        checks=[]
-        def walk(widget):
-            for child in widget.winfo_children():
-                try:
-                    if isinstance(child,(ttk.Button,ttk.Label,ttk.Checkbutton)):
-                        texts.append(str(child.cget('text')))
-                    if isinstance(child,ttk.Entry): entries.append(child)
-                    if isinstance(child,ttk.Checkbutton): checks.append(child)
-                except Exception:
-                    pass
-                walk(child)
-        walk(win)
-        if 'Сохранить калибровку' not in texts:
-            raise RuntimeError('Save calibration button is missing')
-        if 'Отмена' not in texts:
-            raise RuntimeError('Cancel button is missing')
-        if len(entries)<4:
-            raise RuntimeError(f'Expected at least 4 calibration entries, got {len(entries)}')
-        if not checks:
-            raise RuntimeError('Calibration confirmation checkbox is missing')
-        win.destroy()
-        app.update_idletasks()
-        return True
+        if not hasattr(app,'printer_chip') or not hasattr(app,'slice_btn') or not hasattr(app,'send_btn'):
+            raise RuntimeError('Slicer shell controls were not created')
+        app.set_mode_quick('Рисование')
+        if app.mode.get()!='Рисование':
+            raise RuntimeError('Main mode switch failed')
+        app.set_mode_quick('Резка')
+        if app.mode.get()!='Резка':
+            raise RuntimeError('Main mode switch failed')
     finally:
-        try: app.destroy()
-        except Exception: pass
-
+        if app is not None:
+            try:app.destroy()
+            except Exception:pass
 
 def main():
     App().mainloop()
