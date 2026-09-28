@@ -121,7 +121,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item novatech_cut/app.py.part* -Force
-          $items = @("novatech_cut","build","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
+          $items = @("novatech_cut","build","assets","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
           Compress-Archive $items dist/Sibir_Cut_v0.3.0_SOURCE.zip -Force
 
       - name: Write SHA256 checksums
