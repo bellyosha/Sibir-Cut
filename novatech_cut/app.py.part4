@@ -7,10 +7,12 @@
         width=min(800,max(640,int(screen_w*0.68)));height=min(620,max(480,int(screen_h*0.72)))
         w.geometry(f'{width}x{height}+20+20');w.minsize(600,450);w.transient(self);w.grab_set()
 
-        vx=tk.DoubleVar(value=self.project.printer.tool_offset_x)
-        vy=tk.DoubleVar(value=self.project.printer.tool_offset_y)
-        vw=tk.DoubleVar(value=self.project.printer.work_z)
-        vs=tk.DoubleVar(value=self.project.printer.safe_z)
+        p0=self.project.printer;tool_key=p0.tool_key_for_mode(self.project.material.mode);tool_name='ручки' if tool_key=='pen' else 'ножа'
+        cur=p0.get_tool_calibration(tool_key)
+        vx=tk.DoubleVar(value=cur['offset_x'])
+        vy=tk.DoubleVar(value=cur['offset_y'])
+        vw=tk.DoubleVar(value=cur['z'])
+        vs=tk.DoubleVar(value=cur['safe_z'])
         ok=tk.BooleanVar(master=w,value=False)
 
         def apply():
@@ -22,10 +24,11 @@
                     if not messagebox.askyesno('Проверка Z','Безопасная Z не выше рабочей Z. Вы уверены, что для вашей механики это правильно?',parent=w):
                         return
                 p=self.project.printer
-                p.tool_offset_x=float(vx.get());p.tool_offset_y=float(vy.get())
-                p.work_z=contact_z;p.safe_z=safe_z;p.z_calibration_version=2;p.calibrated=True
+                p.set_tool_calibration(tool_key,offset_x=float(vx.get()),offset_y=float(vy.get()),z=contact_z,safe_z=safe_z,calibrated=True)
+                p.apply_tool_calibration(self.project.material.mode);p.z_calibration_version=2
                 if self.project.material.mode!='Рисование':self.project.material.work_z=p.work_z
-                self.project.material.safe_z=p.safe_z
+                else:self.project.material.work_z=p.work_z
+                self.project.material.safe_z=max(float(self.project.material.safe_z),p.safe_z)
                 w.destroy();self.refresh_all()
             except Exception as exc:
                 messagebox.showerror('Калибровка',str(exc),parent=w)
@@ -33,14 +36,15 @@
         # Top action bar is intentionally first and always visible, even if
         # Windows DPI scaling clips the lower edge of the window.
         toolbar=ttk.Frame(w,padding=(10,8));toolbar.pack(side='top',fill='x')
-        ttk.Label(toolbar,text='Калибровка A1 + UMTS',style='Title.TLabel').pack(side='left')
+        ttk.Label(toolbar,text=f'Калибровка A1 + UMTS — {tool_name}',style='Title.TLabel').pack(side='left')
         ttk.Button(toolbar,text='Отмена',command=w.destroy).pack(side='right')
         ttk.Button(toolbar,text='Сохранить калибровку',style='Danger.TButton',command=apply).pack(side='right',padx=(0,8))
 
         values=ttk.LabelFrame(w,text='Измеренные значения',padding=10)
         values.pack(side='bottom',fill='x',padx=10,pady=(4,4))
         values.grid_columnconfigure(1,weight=1)
-        for row,(lab,var) in enumerate([('Offset X, мм',vx),('Offset Y, мм',vy),('Z первого касания, без нажима',vw),('Минимальная безопасная Z',vs)]):
+        z_label='Z первого касания ручки, без нажима' if tool_key=='pen' else 'Рабочая Z ножа'
+        for row,(lab,var) in enumerate([('Offset X кончика от сопла, мм',vx),('Offset Y кончика от сопла, мм',vy),(z_label,vw),('Минимальная безопасная Z',vs)]):
             ttk.Label(values,text=lab).grid(row=row,column=0,sticky='w',padx=(0,10),pady=3)
             ttk.Entry(values,textvariable=var).grid(row=row,column=1,sticky='ew',pady=3)
 
@@ -56,20 +60,18 @@
         txt=tk.Text(body,wrap='word',font=('Segoe UI',10),height=8)
         sb=ttk.Scrollbar(body,orient='vertical',command=txt.yview);txt.configure(yscrollcommand=sb.set)
         txt.grid(row=0,column=0,sticky='nsew');sb.grid(row=0,column=1,sticky='ns')
-        txt.insert('1.0','''Мастер калибровки Sibir Cut
+        txt.insert('1.0',f'''Мастер калибровки Sibir Cut — профиль {tool_name}
 
-1. Снимите UMTS. Любой homing выполняется только без режущего модуля.
-2. Выполните штатный homing на принтере.
-3. Закрепите материал/коврик.
-4. После остановки головки установите UMTS.
-5. Измерьте смещение X/Y кончика ножа или ручки относительно сопла.
-6. Найдите безопасную Z — инструмент гарантированно не касается материала.
-7. Найдите рабочую Z маленькими шагами на ненужном материале.
-8. Введите значения ниже, поставьте галочку и нажмите «Сохранить калибровку» ВВЕРХУ окна. Перед каждым заданием повторяйте только ручной Home с UMTS снятым.
+Лучше выполнять XY/Z калибровку из окна «LAN управление»: там Sibir Cut сам вычисляет Offset по общей метке сопла и инструмента.
 
-Offset X/Y — реальное смещение инструмента от сопла.
-Рабочая Z — высота контакта инструмента с материалом.
-Безопасная Z — высота холостого перемещения без касания.
+Ручной ввод:
+1. Снимите UMTS и выполните Home.
+2. Измерьте физическое смещение кончика {tool_name} относительно сопла.
+3. Offset X/Y хранится именно как: КОНЧИК = СОПЛО + OFFSET.
+4. Найдите безопасную Z.
+5. Для ножа укажите рабочую Z; для ручки — первое касание без нажима.
+6. Сохраните профиль. При выборе «Резка» или «Рисование» нужный профиль применяется автоматически.
+
 
 Горячие клавиши:
 Ctrl+Enter — сохранить калибровку
@@ -82,14 +84,14 @@ Esc — отмена
         w.bind('<Control-Return>',lambda e:apply())
     def export(self,show_message=True):
         try:
-            self.sync_material();paths=prepare_paths(self.project.objects,self.project.material)
+            self.sync_material();self.apply_active_tool_calibration();paths=prepare_paths(self.project.objects,self.project.material)
             if not paths:raise GCodeError('Нет траекторий для экспорта')
             info=analyze_path_bounds(paths,self.project.printer)
             if info['outside_physical'] or info['outside_safe']:
-                x0,y0,x1,y1=info['tool_bounds'];l,b,r,t=self.project.printer.safe_bounds
+                x0,y0,x1,y1=info['tool_bounds'];nx0,ny0,nx1,ny1=info.get('nozzle_bounds',(x0,y0,x1,y1));l,b,r,t=self.project.printer.safe_bounds
                 messagebox.showwarning(
                     'Траектория выходит за границы',
-                    f'Экспорт остановлен.\n\nФактическая траектория инструмента с учётом Offset X/Y:\nX {x0:.2f}…{x1:.2f} мм\nY {y0:.2f}…{y1:.2f} мм\n\nБезопасная область:\nX {l:.2f}…{r:.2f} мм\nY {b:.2f}…{t:.2f} мм\n\nПереместите или уменьшите объект.',
+                    f'Экспорт остановлен.\n\nКончики ножа/ручки:\nX {x0:.2f}…{x1:.2f} мм\nY {y0:.2f}…{y1:.2f} мм\n\nПоложение сопла после компенсации Offset:\nX {nx0:.2f}…{nx1:.2f} мм\nY {ny0:.2f}…{ny1:.2f} мм\n\nБезопасная область инструмента:\nX {l:.2f}…{r:.2f} мм\nY {b:.2f}…{t:.2f} мм\n\nПереместите или уменьшите объект.',
                     parent=self
                 )
                 return None
@@ -112,6 +114,11 @@ Esc — отмена
             return f
         except Exception as e:
             messagebox.showerror('Экспорт заблокирован',str(e));return None
+
+    def export_and_send(self):
+        path=self.export(show_message=False)
+        if path:
+            upload_path_via_lan(self,path,parent=self)
 
 def calibration_gui_self_test():
     """Create the calibration dialog and verify its critical controls exist."""
