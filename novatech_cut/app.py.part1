@@ -113,13 +113,17 @@ class App(tk.Tk):
 
         self.material_var=tk.StringVar(value=self.project.material.name)
         self.mode=tk.StringVar();self.passes=tk.IntVar();self.work_speed=tk.DoubleVar();self.travel_speed=tk.DoubleVar();self.work_z=tk.DoubleVar();self.safe_z=tk.DoubleVar();self.blade_offset=tk.DoubleVar();self.overcut=tk.DoubleVar()
-        self.drawing_style=tk.StringVar();self.fill_spacing=tk.DoubleVar();self.fill_angle=tk.DoubleVar();self.fill_crosshatch=tk.BooleanVar();self.fill_inset=tk.DoubleVar();self.pen_press=tk.DoubleVar();self.pen_lift=tk.DoubleVar()
+        self.drawing_style=tk.StringVar();self.fill_spacing=tk.DoubleVar();self.fill_angle=tk.DoubleVar();self.fill_crosshatch=tk.BooleanVar();self.fill_inset=tk.DoubleVar();self.pen_press=tk.DoubleVar();self.pen_lift=tk.DoubleVar();self.mirror_job=tk.BooleanVar(value=False)
 
         modebox=tk.Frame(ri,bg='#f1f5f9',height=50);modebox.pack(fill='x');modebox.pack_propagate(False)
         self.cut_mode_btn=RoundedButton(modebox,'РЕЗКА',lambda:self.set_mode_quick('Резка'),width=135,height=40,radius=12,bg='#0f766e',fg='white',hover='#115e59',parent_bg='#f1f5f9')
         self.cut_mode_btn.pack(side='left',padx=(4,2),pady=5)
         self.draw_mode_btn=RoundedButton(modebox,'РИСОВАНИЕ',lambda:self.set_mode_quick('Рисование'),width=145,height=40,radius=12,bg='#e2e8f0',fg='#475569',hover='#cbd5e1',parent_bg='#f1f5f9')
         self.draw_mode_btn.pack(side='right',padx=(2,4),pady=5)
+        mirror_box=tk.Frame(ri,bg='#ffffff');mirror_box.pack(fill='x',pady=(10,0))
+        self.mirror_check=tk.Checkbutton(mirror_box,text='Зеркально / наизнанку',variable=self.mirror_job,command=self.toggle_job_mirror,bg='#ffffff',fg='#334155',activebackground='#ffffff',activeforeground='#0f172a',selectcolor='#ffffff',font=('Segoe UI',10,'bold'),cursor='hand2')
+        self.mirror_check.pack(anchor='w')
+        tk.Label(mirror_box,text='Отражает всю работу по горизонтали. Предпросмотр меняется сразу.',bg='#ffffff',fg='#64748b',font=('Segoe UI',9),wraplength=275,justify='left').pack(anchor='w',pady=(1,0))
 
         self.main_summary=tk.Label(ri,text='',bg='#ffffff',fg='#475569',font=('Segoe UI',9),justify='left',anchor='w',wraplength=285)
         self.main_summary.pack(fill='x',pady=(12,8))
@@ -171,6 +175,10 @@ class App(tk.Tk):
         self.mode.set(mode);self.project.material.mode=mode
         self.apply_job_settings();self._refresh_mode_buttons();self.update_main_summary()
 
+    def toggle_job_mirror(self):
+        self.project.material.mirror_x=bool(self.mirror_job.get())
+        self._rebuild_prepared();self.draw();self.update_status();self.update_main_summary()
+
     def _refresh_mode_buttons(self):
         if not hasattr(self,'cut_mode_btn'):return
         cutting=self.mode.get()!='Рисование'
@@ -182,7 +190,8 @@ class App(tk.Tk):
         m=self.project.material
         typ='Рисование' if m.mode=='Рисование' else 'Резка'
         extra=(f"Штриховка {m.fill_spacing:.2f} мм • {m.fill_angle:.0f}°" if m.mode=='Рисование' else f"{m.passes} проход(а) • {m.work_speed:.0f} мм/с")
-        self.main_summary.config(text=f'{typ}\nПрофиль: {m.name}\n{extra}')
+        orientation='Зеркально / наизнанку' if bool(getattr(m,'mirror_x',False)) else 'Обычная ориентация'
+        self.main_summary.config(text=f'{typ}\nПрофиль: {m.name}\n{extra}\n{orientation}')
 
     def _close_app(self):
         c=getattr(self,'_lan_client',None)
