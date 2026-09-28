@@ -89,39 +89,106 @@
     def _canvas_to_bed(self,cx,cy):
         ox,oy=self.origin;z=self.zoom;p=self.project.printer
         return ((cx-ox)/z, p.bed_height-(cy-oy)/z)
+    def _bed_to_canvas(self,x,y):
+        ox,oy=self.origin;z=self.zoom;p=self.project.printer
+        return (ox+x*z,oy+(p.bed_height-y)*z)
     def _object_bounds(self,obj):
         try:return bbox(transformed_paths(obj))
         except Exception:return (0,0,0,0)
+    def _sync_transform_fields(self,obj):
+        self.vars['x'].set(round(float(obj.x),3));self.vars['y'].set(round(float(obj.y),3))
+        self.vars['scale'].set(round(float(obj.scale),4));self.vars['rotation'].set(round(float(obj.rotation_deg),2))
+    def _transform_handles(self,index=None):
+        if index is None:index=self.current_index()
+        if index is None or index<0 or index>=len(self.project.objects):return None
+        obj=self.project.objects[index];x0,y0,x1,y1=self._object_bounds(obj)
+        A=self._bed_to_canvas(x0,y1);B=self._bed_to_canvas(x1,y0)
+        mx=(A[0]+B[0])/2.0
+        return {
+            'bounds':(A[0],A[1],B[0],B[1]),
+            'rotate':(mx,A[1]-28.0),
+            'rotate_anchor':(mx,A[1]),
+            'scale':(B[0],B[1]),
+        }
+    def _near_px(self,event,point,radius=None):
+        if point is None:return False
+        r=float(radius or self._transform_handle_radius)
+        return math.hypot(float(event.x)-point[0],float(event.y)-point[1])<=r
+    def _point_inside_selected_box(self,event):
+        h=self._transform_handles()
+        if not h:return False
+        x0,y0,x1,y1=h['bounds'];pad=3
+        return min(x0,x1)-pad<=event.x<=max(x0,x1)+pad and min(y0,y1)-pad<=event.y<=max(y0,y1)+pad
+    def _clamp_object_to_work_area(self,obj):
+        x0,y0,x1,y1=self._object_bounds(obj);p=self.project.printer;l,b,r,t=p.safe_bounds
+        xl=max(l,float(p.tool_offset_x));xr=min(r,float(p.bed_width)+float(p.tool_offset_x))
+        yb=max(b,float(p.tool_offset_y));yt=min(t,float(p.bed_height)+float(p.tool_offset_y))
+        if x0<xl:obj.x+=xl-x0
+        if x1>xr:obj.x-=x1-xr
+        if y0<yb:obj.y+=yb-y0
+        if y1>yt:obj.y-=y1-yt
     def on_canvas_press(self,event):
-        x,y=self._canvas_to_bed(event.x,event.y);hit=None
-        for i in range(len(self.project.objects)-1,-1,-1):
-            x0,y0,x1,y1=self._object_bounds(self.project.objects[i])
-            if x0-2<=x<=x1+2 and y0-2<=y<=y1+2:
-                hit=i;break
+        x,y=self._canvas_to_bed(event.x,event.y)
+        sel=self.current_index();handles=self._transform_handles(sel)
+        action=None;hit=sel
+        if handles and self._near_px(event,handles['rotate'],14):
+            action='rotate'
+        elif handles and self._near_px(event,handles['scale'],14):
+            action='scale'
+        else:
+            hit=None
+            for i in range(len(self.project.objects)-1,-1,-1):
+                x0,y0,x1,y1=self._object_bounds(self.project.objects[i])
+                if x0-2<=x<=x1+2 and y0-2<=y<=y1+2:
+                    hit=i;break
+            if hit is not None:action='move'
         if hit is None:
-            self.listbox.selection_clear(0,'end');self._drag=None;self.draw();return
+            self.listbox.selection_clear(0,'end');self._drag=None;self._drag_active=False;self.draw();return
         self.listbox.selection_clear(0,'end');self.listbox.selection_set(hit);self.listbox.activate(hit);self.load_obj_fields()
-        self.checkpoint();o=self.project.objects[hit]
-        self._drag={'index':hit,'start_pointer':(x,y),'start_xy':(o.x,o.y)};self._drag_active=True
+        self.checkpoint();o=self.project.objects[hit];center=object_world_center(o)
+        drag={
+            'index':hit,'action':action,'start_pointer':(x,y),'start_xy':(float(o.x),float(o.y)),
+            'start_scale':float(o.scale),'start_rotation':float(o.rotation_deg),'center':center,
+        }
+        if action=='rotate':
+            drag['start_angle']=math.atan2(y-center[1],x-center[0])
+        elif action=='scale':
+            drag['start_distance']=max(1e-6,math.hypot(x-center[0],y-center[1]))
+        self._drag=drag;self._drag_active=True
     def on_canvas_drag(self,event):
         if not self._drag:return
         i=self._drag['index']
         if i>=len(self.project.objects):return
-        x,y=self._canvas_to_bed(event.x,event.y);sx,sy=self._drag['start_pointer'];ox0,oy0=self._drag['start_xy'];o=self.project.objects[i]
-        o.x=ox0+(x-sx);o.y=oy0+(y-sy)
-        x0,y0,x1,y1=self._object_bounds(o);p=self.project.printer;l,b,r,t=p.safe_bounds
-        # Geometry is the tool-tip path. The nozzle follows tool-offset, so
-        # clamp the object to the intersection of tool-safe and nozzle-physical bounds.
-        xl=max(l,float(p.tool_offset_x));xr=min(r,float(p.bed_width)+float(p.tool_offset_x))
-        yb=max(b,float(p.tool_offset_y));yt=min(t,float(p.bed_height)+float(p.tool_offset_y))
-        if x0<xl:o.x+=xl-x0
-        if x1>xr:o.x-=x1-xr
-        if y0<yb:o.y+=yb-y0
-        if y1>yt:o.y-=y1-yt
-        self.vars['x'].set(round(o.x,3));self.vars['y'].set(round(o.y,3));self.draw()
+        x,y=self._canvas_to_bed(event.x,event.y);o=self.project.objects[i];action=self._drag.get('action','move')
+        if action=='move':
+            sx,sy=self._drag['start_pointer'];ox0,oy0=self._drag['start_xy']
+            o.x=ox0+(x-sx);o.y=oy0+(y-sy);self._clamp_object_to_work_area(o)
+        elif action=='rotate':
+            cx,cy=self._drag['center'];ang=math.atan2(y-cy,x-cx)
+            deg=self._drag['start_rotation']+math.degrees(ang-self._drag['start_angle'])
+            # Holding Shift snaps to 15 degrees; otherwise rotation is continuous.
+            if int(getattr(event,'state',0)) & 0x0001:deg=round(deg/15.0)*15.0
+            deg=((deg+180.0)%360.0)-180.0
+            set_object_transform_about_center(o,self._drag['center'],scale=self._drag['start_scale'],rotation_deg=deg)
+        elif action=='scale':
+            cx,cy=self._drag['center'];dist=max(1e-6,math.hypot(x-cx,y-cy));ratio=dist/self._drag['start_distance']
+            new_scale=max(0.01,min(100.0,self._drag['start_scale']*ratio))
+            set_object_transform_about_center(o,self._drag['center'],scale=new_scale,rotation_deg=self._drag['start_rotation'])
+        self._sync_transform_fields(o);self.draw()
     def on_canvas_release(self,event):
         if not self._drag:return
         self._drag=None;self._drag_active=False;self.refresh_all()
+    def on_canvas_hover(self,event):
+        try:
+            h=self._transform_handles()
+            if h and self._near_px(event,h['rotate'],14):cursor='crosshair'
+            elif h and self._near_px(event,h['scale'],14):cursor='sizing'
+            elif h and self._point_inside_selected_box(event):cursor='fleur'
+            else:cursor=''
+            self.canvas.configure(cursor=cursor)
+        except Exception:
+            try:self.canvas.configure(cursor='')
+            except Exception:pass
     def set_zoom(self,z):self.zoom=max(0.4,min(8,z));self.draw()
     def on_wheel(self,e):self.set_zoom(self.zoom*(1.12 if e.delta>0 else 1/1.12))
     def draw(self):
@@ -158,9 +225,18 @@
             prev=path[-1]
         sel=self.current_index()
         if sel is not None and sel<len(self.project.objects):
-            x0s,y0s,x1s,y1s=self._object_bounds(self.project.objects[sel]);A=pt(x0s,y1s);B=pt(x1s,y0s)
-            c.create_rectangle(A[0],A[1],B[0],B[1],outline='#16a34a',dash=(6,3),width=2)
-        c.create_text(ox+8,oy+8,text='Bambu Lab A1 — 256 × 256 мм   •   ЛКМ: выбрать и перетащить',anchor='nw',fill='#334155')
+            h=self._transform_handles(sel)
+            if h:
+                xa,ya,xb,yb=h['bounds'];rx,ry=h['rotate'];rax,ray=h['rotate_anchor'];sx,sy=h['scale']
+                c.create_rectangle(xa,ya,xb,yb,outline='#0f766e',dash=(6,3),width=2)
+                c.create_line(rax,ray,rx,ry,fill='#0f766e',width=2)
+                c.create_oval(rx-7,ry-7,rx+7,ry+7,fill='#ffffff',outline='#0f766e',width=3)
+                c.create_rectangle(sx-7,sy-7,sx+7,sy+7,fill='#0f766e',outline='#ffffff',width=2)
+                o=self.project.objects[sel]
+                c.create_text(rx+14,ry,text=f'{o.rotation_deg:.1f}°',anchor='w',fill='#0f766e',font=('Segoe UI',9,'bold'))
+                c.create_text(sx-10,sy+12,text=f'{o.scale:.3f}×',anchor='ne',fill='#0f766e',font=('Segoe UI',9,'bold'))
+        c.create_text(ox+8,oy+8,text='ЛКМ: двигать  •  ○: вращать  •  ■: масштаб  •  Shift при вращении: шаг 15°',anchor='nw',fill='#334155')
+
     def update_status(self):
         try:
             if self.prepare_error:
