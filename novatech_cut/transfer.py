@@ -26,15 +26,16 @@ def sanitize_remote_name(name: str) -> str:
     base = Path(str(name or "")).name.strip()
     if not base:
         raise BambuTransferError("Пустое имя файла")
-    clean = re.sub(r"[^A-Za-z0-9._+-]", "_", base)
-    clean = re.sub(r"_+", "_", clean).strip("._")
-    if not clean:
-        clean = "sibir_cut_job.gcode"
-    if "." not in clean and "." in base:
-        clean += Path(base).suffix.lower()
+    suffix = Path(base).suffix.lower()
+    stem = base[:-len(suffix)] if suffix else base
+    clean_stem = re.sub(r"[^A-Za-z0-9_+-]", "_", stem)
+    clean_stem = re.sub(r"_+", "_", clean_stem).strip("_")
+    if not clean_stem:
+        clean_stem = "sibir_cut_job"
+    clean_suffix = re.sub(r"[^A-Za-z0-9.]", "", suffix)
+    clean = clean_stem + clean_suffix
     if len(clean) > 110:
-        suffix = Path(clean).suffix
-        clean = clean[: max(1, 110-len(suffix))] + suffix
+        clean = clean_stem[: max(1, 110-len(clean_suffix))] + clean_suffix
     return clean
 
 
