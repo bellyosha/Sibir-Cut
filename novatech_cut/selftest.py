@@ -8,6 +8,7 @@ from .geometry import path_length, load_raster, _morphological_skeleton, hatch_f
 from .gcode import generate_gcode, validate_gcode, analyze_path_bounds, GCodeError
 from .lan import lan_self_test
 from .discovery import discovery_self_test
+from .transfer import transfer_self_test
 from .models import Project, SceneObject, PrinterProfile
 from .pack3mf import build_gcode_3mf, inspect_gcode_3mf, build_orca_preview_3mf, inspect_orca_preview_3mf
 from .pipeline import prepare_paths, import_paths, detect_import_kind
@@ -150,8 +151,9 @@ def _bounds_regression_test() -> None:
     if info['outside_safe'] or info['outside_physical']:
         raise RuntimeError('Valid toolpath was incorrectly marked outside the bed')
 
-    # Offset must participate in safety checking.
-    project.printer.tool_offset_x=20.0
+    # Physical convention: tool_tip = nozzle + offset. A negative X offset
+    # shifts the nozzle to the right and may push it beyond the bed.
+    project.printer.tool_offset_x=-20.0
     near_edge=[[(240.0,20.0),(250.0,20.0)]]
     info=analyze_path_bounds(near_edge,project.printer)
     if not info['outside_physical']:
@@ -162,6 +164,28 @@ def _bounds_regression_test() -> None:
         pass
     else:
         raise RuntimeError('Export did not block a toolpath outside the physical bed')
+
+    project.printer.tool_offset_x=20.0
+    probe=[[(100.0,100.0),(110.0,100.0)]]
+    g,_=generate_gcode(probe,project.printer,project.material,air_test=True)
+    if 'G1 X80 Y100' not in g:
+        raise RuntimeError('Tool offset sign is wrong: nozzle must move to tool_x - offset_x')
+
+def _tool_calibration_regression_test() -> None:
+    p=PrinterProfile()
+    p.set_tool_calibration('knife',offset_x=12.5,offset_y=-3.0,z=4.2,safe_z=8.0,xy_calibrated=True,z_calibrated=True)
+    p.set_tool_calibration('pen',offset_x=-8.0,offset_y=6.0,z=5.1,safe_z=9.0,xy_calibrated=True,z_calibrated=True)
+    p.apply_tool_calibration('Резка')
+    if not p.calibrated or abs(p.tool_offset_x-12.5)>1e-9 or abs(p.work_z-4.2)>1e-9:
+        raise RuntimeError('Knife calibration was not auto-applied')
+    p.apply_tool_calibration('Рисование')
+    if not p.calibrated or abs(p.tool_offset_x+8.0)>1e-9 or abs(p.work_z-5.1)>1e-9:
+        raise RuntimeError('Pen calibration was not auto-applied')
+    p2=PrinterProfile()
+    p2.set_tool_calibration('knife',offset_x=1.0,offset_y=2.0,xy_calibrated=True)
+    p2.apply_tool_calibration('Резка')
+    if p2.calibrated:
+        raise RuntimeError('XY-only calibration must not unlock export before Z is calibrated')
 
 def _drawing_z_safety_regression_test() -> None:
     project=Project();project.printer.calibrated=True
@@ -247,6 +271,7 @@ def _service_wait_migration_test() -> None:
 def run_self_test() -> None:
     discovery_self_test()
     lan_self_test()
+    transfer_self_test()
     _service_wait_migration_test()
     project = Project()
     project.printer.calibrated = True
@@ -304,6 +329,7 @@ def run_self_test() -> None:
         _centerline_completeness_regression_test()
         _drawing_fill_regression_test()
         _bounds_regression_test()
+        _tool_calibration_regression_test()
         _drawing_z_safety_regression_test()
         _direct_gcode_regression_test()
 
