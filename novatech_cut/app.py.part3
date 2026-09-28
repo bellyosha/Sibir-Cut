@@ -123,19 +123,20 @@
                 grid.columnconfigure(1,weight=1)
                 note('Для заполненных букв: «Рисование» → «Контур + заливка». Z калибровки — первое касание без нажима. Начните с прижима 0,05–0,10 мм и подъёма 5 мм.')
             elif i==3:
-                desc.config(text='Калибровка сообщает программе, где относительно сопла находится UMTS и на какой Z инструмент касается материала. Homing теперь выполняется ВРУЧНУЮ до запуска файла, пока UMTS снят.')
-                p=self.project.printer
-                if p.calibrated:note(f'✓ Профиль откалиброван. Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}; Z первого касания={p.work_z:.2f}; минимальная безопасная Z={p.safe_z:.2f}.','ok')
-                else:note('Профиль ещё не откалиброван. Реальный экспорт заблокирован.','bad')
-                note('Что означает каждый параметр:\n• Offset X/Y — смещение кончика ножа/ручки от сопла.\n• Z первого касания — ручка только начинает касаться материала, БЕЗ нажима.\n• Минимальная безопасная Z — инструмент гарантированно не касается материала.\n• Для рисования фактический прижим и подъём задаются отдельно в параметрах задания.\n\nПеред КАЖДЫМ запуском задания сначала выполните штатный Home на экране A1 при СНЯТОМ UMTS. Сам файл больше не вызывает G28, чтобы не запускать лишний сервисный цикл. Значения Z нельзя угадывать.')
-                ttk.Button(body,text='Открыть мастер калибровки',command=self.calibrate).pack(anchor='w',pady=8);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
+                desc.config(text='Для ножа и ручки теперь хранятся отдельные калибровки. При выборе «Резка» или «Рисование» Sibir Cut автоматически применяет нужные Offset X/Y и Z.')
+                p=self.project.printer;tool='ручки' if self.project.material.mode=='Рисование' else 'ножа';cur=p.get_tool_calibration(self.project.material.mode)
+                if p.calibrated:note(f"✓ Профиль {tool} готов. Offset X={p.tool_offset_x:.3f}, Y={p.tool_offset_y:.3f}; Z={p.work_z:.3f}; безопасная Z={p.safe_z:.3f}.",'ok')
+                else:note(f"Профиль {tool} не завершён: XY={'OK' if cur.get('xy_calibrated') else 'нет'}, Z={'OK' if cur.get('z_calibrated') else 'нет'}. Экспорт заблокирован.",'bad')
+                note('Рекомендуемый способ: «LAN управление» → Home с UMTS снятым → калибровка Offset по общей метке сопла/инструмента → точная настройка Z.\n\nOffset хранится физически: КОНЧИК = СОПЛО + OFFSET. Знак вычисляет программа. Для ручки Z — первое касание без нажима, а прижим задаётся отдельно.')
+                ttk.Button(body,text='Открыть LAN-калибровку',command=lambda:open_lan_control(self)).pack(anchor='w',pady=8);ttk.Button(body,text='Ручной ввод калибровки',command=self.calibrate).pack(anchor='w',pady=4);ttk.Button(body,text='Обновить статус',command=render).pack(anchor='w')
             else:
-                desc.config(text='Создаётся прямой .gcode для A1. Его нельзя заново нарезать в Orca.')
-                note('Sibir Cut создаёт прямой .gcode без штатного стартового кода Bambu. Скопируйте его на microSD и запускайте с экрана A1. Orca для запуска рабочего файла не используется.')
-                note('Порядок запуска на A1:\n1. Сохраните рабочий .gcode.\n2. Скопируйте его на microSD и вставьте карту в A1.\n3. UMTS СНЯТ. На экране A1 вручную выполните Home.\n4. Только после завершения Home запустите файл.\n5. Файл принудительно задаёт M104 S0 / M140 S0, затем головка идёт к переднему краю X230 Y10.\n6. В X230 Y10 выполняется фиксированное ожидание установки UMTS. Головка НЕ должна уезжать к очистке сопла.\n7. Выполнится резка/рисование без нагрева и экструзии.\n8. В конце головка снова идёт к X230 Y10 и остаётся там на время ожидания снятия UMTS.','warn')
+                desc.config(text='Создаётся прямой .gcode для A1. Его можно сохранить на ПК или сразу передать выбранному A1 по локальной сети.')
+                note('LAN-передача идёт напрямую на принтер по FTPS/TLS. Sibir Cut загружает файл в cache и проверяет завершение передачи. Автоматический старт задания пока не выполняется — запускайте загруженный файл на экране A1. microSD остаётся запасным способом.')
+                note('Порядок запуска:\n1. UMTS СНЯТ — выполните Home на A1 или из LAN-панели.\n2. Экспортируйте и отправьте .gcode по LAN.\n3. Запустите файл на A1.\n4. Файл отключает нагрев и едет к переднему краю X230 Y10.\n5. Во время короткой паузы установите UMTS.\n6. Выполнится резка/рисование с автоматически применённой калибровкой.\n7. В конце головка снова вернётся к X230 Y10 для снятия UMTS.','warn')
                 def final_export():
-                    if self.export(show_message=False):messagebox.showinfo('Рабочий файл','Прямой .gcode создан. Скопируйте его на microSD и запускайте с экрана A1, без Orca.',parent=w);render()
-                ttk.Button(body,text='Экспортировать прямой .gcode для A1…',style='Danger.TButton',command=final_export).pack(anchor='w',pady=8)
+                    if self.export(show_message=False):messagebox.showinfo('Рабочий файл','Прямой .gcode создан. Можно отправить его через LAN-панель или использовать microSD.',parent=w);render()
+                ttk.Button(body,text='Экспортировать и отправить на A1 по LAN…',style='Danger.TButton',command=self.export_and_send).pack(anchor='w',pady=8)
+                ttk.Button(body,text='Только экспортировать .gcode…',command=final_export).pack(anchor='w',pady=4)
                 ttk.Button(body,text='Открыть папку последнего экспорта',command=open_export_folder).pack(anchor='w')
         def go(delta):
             i=step['i']
