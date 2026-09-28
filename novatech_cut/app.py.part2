@@ -1,5 +1,6 @@
-            center=messagebox.askyesno('Тип изображения','Это тонкий линейный рисунок, где нужна ОДНА линия по середине штриха?\n\nДа — построить осевые линии.\nНет — считать чёрное заполненной фигурой (правильно для резки и закрашивания).',parent=self,default='no')
-            opts={'threshold':th,'external_only':False,'smoothing':sm,'invert':inv,'centerline':center}
+            # 0.3.0: central-line extraction was removed from the normal import
+            # workflow. Raster input is always treated as filled geometry/contours.
+            opts={'threshold':th,'external_only':False,'smoothing':sm,'invert':inv,'centerline':False}
 
         def imported(paths):
             if not paths:
@@ -71,9 +72,10 @@
         tool='РУЧКА' if m.mode=='Рисование' else 'НОЖ'
         p=self.project.printer
         if p.calibrated:
-            self.calib_label.config(text=f'{tool}: калибровка применена • Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}, Z={p.work_z:.3f}',foreground='#15803d')
+            self.calib_label.config(text=f'✓ {tool}: Offset X={p.tool_offset_x:.2f}, Y={p.tool_offset_y:.2f}, Z={p.work_z:.3f}',foreground='#15803d')
         else:
-            self.calib_label.config(text=f'{tool}: НЕТ КАЛИБРОВКИ — экспорт заблокирован',foreground='#b91c1c')
+            self.calib_label.config(text=f'⚠ {tool}: калибровка не завершена',foreground='#b91c1c')
+        self._refresh_mode_buttons();self.update_main_summary()
     def _rebuild_prepared(self):
         try:
             self.prepared_paths=prepare_paths(self.project.objects,self.project.material);self.prepare_error=None
