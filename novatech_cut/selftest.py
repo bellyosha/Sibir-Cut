@@ -7,6 +7,7 @@ from pathlib import Path
 from .geometry import path_length, load_raster, _morphological_skeleton, hatch_fill_paths
 from .gcode import generate_gcode, validate_gcode, analyze_path_bounds, GCodeError
 from .lan import lan_self_test
+from .discovery import discovery_self_test
 from .models import Project, SceneObject, PrinterProfile
 from .pack3mf import build_gcode_3mf, inspect_gcode_3mf, build_orca_preview_3mf, inspect_orca_preview_3mf
 from .pipeline import prepare_paths, import_paths, detect_import_kind
@@ -244,6 +245,7 @@ def _service_wait_migration_test() -> None:
         raise RuntimeError('User-custom service waits must be preserved during migration')
 
 def run_self_test() -> None:
+    discovery_self_test()
     lan_self_test()
     _service_wait_migration_test()
     project = Project()
