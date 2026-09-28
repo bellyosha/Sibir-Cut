@@ -23,8 +23,8 @@ class PrinterProfile:
     # Separate persistent calibration for knife and pen. "z" is working Z
     # for the knife and first-contact Z (without pressure) for the pen.
     tool_calibrations: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
-        "knife": {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "calibrated": False},
-        "pen": {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "calibrated": False},
+        "knife": {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "xy_calibrated": False, "z_calibrated": False, "calibrated": False},
+        "pen": {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "xy_calibrated": False, "z_calibrated": False, "calibrated": False},
     })
     work_z: float = 0.0
     safe_z: float = 5.0
@@ -77,18 +77,23 @@ class PrinterProfile:
 
     def get_tool_calibration(self, key_or_mode: str) -> Dict[str, Any]:
         key = key_or_mode if key_or_mode in ("knife", "pen") else self.tool_key_for_mode(key_or_mode)
-        base = {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "calibrated": False}
+        base = {"offset_x": 0.0, "offset_y": 0.0, "z": 0.0, "safe_z": 5.0, "xy_calibrated": False, "z_calibrated": False, "calibrated": False}
         raw = self.tool_calibrations.get(key, {}) if isinstance(self.tool_calibrations, dict) else {}
         if isinstance(raw, dict):
             base.update(raw)
         for k in ("offset_x", "offset_y", "z", "safe_z"):
             try: base[k] = float(base.get(k, 0.0))
             except Exception: base[k] = 0.0 if k != "safe_z" else 5.0
-        base["calibrated"] = bool(base.get("calibrated", False))
+        if "xy_calibrated" not in raw and base.get("calibrated"): base["xy_calibrated"] = True
+        if "z_calibrated" not in raw and base.get("calibrated"): base["z_calibrated"] = True
+        base["xy_calibrated"] = bool(base.get("xy_calibrated", False))
+        base["z_calibrated"] = bool(base.get("z_calibrated", False))
+        base["calibrated"] = bool(base["xy_calibrated"] and base["z_calibrated"])
         return base
 
     def set_tool_calibration(
-        self, key: str, *, offset_x=None, offset_y=None, z=None, safe_z=None, calibrated=None
+        self, key: str, *, offset_x=None, offset_y=None, z=None, safe_z=None,
+        xy_calibrated=None, z_calibrated=None, calibrated=None
     ) -> Dict[str, Any]:
         if key not in ("knife", "pen"):
             raise ValueError("tool calibration key must be knife or pen")
@@ -99,7 +104,12 @@ class PrinterProfile:
         if offset_y is not None: cur["offset_y"] = float(offset_y)
         if z is not None: cur["z"] = float(z)
         if safe_z is not None: cur["safe_z"] = float(safe_z)
-        if calibrated is not None: cur["calibrated"] = bool(calibrated)
+        if xy_calibrated is not None: cur["xy_calibrated"] = bool(xy_calibrated)
+        if z_calibrated is not None: cur["z_calibrated"] = bool(z_calibrated)
+        if calibrated is not None:
+            cur["xy_calibrated"] = bool(calibrated)
+            cur["z_calibrated"] = bool(calibrated)
+        cur["calibrated"] = bool(cur.get("xy_calibrated") and cur.get("z_calibrated"))
         self.tool_calibrations[key] = cur
         return dict(cur)
 
@@ -148,6 +158,8 @@ class PrinterProfile:
                 "offset_y": float(obj.tool_offset_y),
                 "z": float(obj.work_z),
                 "safe_z": float(obj.safe_z),
+                "xy_calibrated": True,
+                "z_calibrated": True,
                 "calibrated": True,
             }
             obj.tool_calibrations = {"knife": dict(legacy), "pen": dict(legacy)}
