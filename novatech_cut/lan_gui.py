@@ -23,7 +23,7 @@ def upload_path_via_lan(app, path, parent=None, on_done=None):
     if getattr(app,'_lan_upload_busy',False):
         messagebox.showwarning('Отправка по LAN','Передача файла уже выполняется.',parent=parent);return False
 
-    cancel=threading.Event();app._lan_upload_busy=True
+    cancel=threading.Event();app._lan_upload_busy=True;app._lan_upload_cancel=cancel
     win=tk.Toplevel(parent);win.title('Отправка файла на Bambu');win.transient(parent);win.resizable(False,False)
     box=ttk.Frame(win,padding=14);box.pack(fill='both',expand=True)
     ttk.Label(box,text='Передача по LAN → FTPS/TLS 990',style='Title.TLabel').pack(anchor='w')
@@ -41,7 +41,7 @@ def upload_path_via_lan(app, path, parent=None, on_done=None):
         try:result=upload_file(client.host,client.access_code,path,progress=progress,cancel=cancel)
         except Exception as exc:err=exc
         def finish():
-            app._lan_upload_busy=False
+            app._lan_upload_busy=False;app._lan_upload_cancel=None
             try:win.destroy()
             except Exception:pass
             if err is None:
@@ -517,6 +517,7 @@ def open_lan_control(app):
             serial.set(p.serial)
             codes=cfg.get('access_codes',{}) if isinstance(cfg.get('access_codes',{}),dict) else {}
             if p.serial in codes and codes[p.serial]:access.set(str(codes[p.serial]))
+            load_saved_tool_calibrations();update_offset_status()
             scan_status.set(f'Выбран: {p.display_name()} • {p.ip}')
         else:
             scan_status.set(f'Выбран IP {p.ip}; SSDP не сообщил серийный номер — введите SN вручную.')
@@ -546,7 +547,7 @@ def open_lan_control(app):
                 connecting['value']=False;connect_btn.config(state='normal')
                 if err is not None:
                     conn_status.set('Ошибка подключения');messagebox.showerror('LAN подключение',str(err),parent=w);return
-                app._lan_client=c;conn_status.set('Подключено');reset_position()
+                app._lan_client=c;conn_status.set('Подключено');reset_position();load_saved_tool_calibrations();update_offset_status()
             try:app.after(0,finish)
             except Exception:
                 if c is not None:c.close()
