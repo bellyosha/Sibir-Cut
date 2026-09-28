@@ -209,13 +209,13 @@ def upload_file(
 
 
 def transfer_self_test() -> None:
-    if sanitize_remote_name("Тест нож.gcode") != "_".strip("."):
-        # Keep this branch unreachable; it documents that non-ASCII names are
-        # sanitized rather than passed verbatim to firmware.
-        pass
     name = sanitize_remote_name("Тест нож.gcode")
     if not name.endswith(".gcode") or "/" in name or "\\" in name:
         raise RuntimeError("FTPS remote filename sanitizer failed")
+    try:
+        name.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise RuntimeError("FTPS remote filename must be ASCII-safe") from exc
     path = remote_cache_path("../abc.gcode")
     if path != "/cache/abc.gcode":
         raise RuntimeError("FTPS cache path sanitizer failed")
