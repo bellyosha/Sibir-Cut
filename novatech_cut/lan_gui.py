@@ -30,7 +30,7 @@ def upload_path_via_lan(app, path, parent=None, on_done=None):
     cancel=threading.Event();app._lan_upload_busy=True;app._lan_upload_cancel=cancel
     win=tk.Toplevel(parent);win.title('Отправка файла на Bambu');win.transient(parent);win.resizable(False,False)
     box=ttk.Frame(win,padding=14);box.pack(fill='both',expand=True)
-    ttk.Label(box,text='Передача по LAN → FTPS/TLS 990',style='Title.TLabel').pack(anchor='w')
+    ttk.Label(box,text='Передача файла на A1 по LAN',style='Title.TLabel').pack(anchor='w')
     name=str(path).replace('\\','/').split('/')[-1]
     status=tk.StringVar(value=f'Подготовка: {name}')
     ttk.Label(box,textvariable=status,wraplength=480).pack(anchor='w',pady=(8,4))
@@ -49,8 +49,8 @@ def upload_path_via_lan(app, path, parent=None, on_done=None):
             try:win.destroy()
             except Exception:pass
             if err is None:
-                verified='размер проверен' if result.get('verified_size') else 'сервер подтвердил STOR'
-                messagebox.showinfo('Отправка по LAN',f"Файл отправлен на A1.\n\n{result.get('remote_path')}\n{result.get('size_bytes')} байт • {verified}\n\nАвтоматический запуск задания не выполнялся.",parent=parent)
+                ack='подтверждение A1 получено' if result.get('acknowledged') else 'байты переданы; ожидание 226 пропущено для совместимости A1'
+                messagebox.showinfo('Отправка по LAN',f"Файл отправлен на A1.\n\n{result.get('remote_path')}\n{result.get('size_bytes')} байт • {result.get('data_mode','LAN')}\n{ack}\n\nSibir Cut НЕ запускает задание. Запустите файл вручную с экрана принтера.",parent=parent)
                 if on_done:
                     try:on_done(result,None)
                     except Exception:pass
@@ -184,7 +184,7 @@ def open_lan_control(app):
     send_file_btn=ttk.Button(fr,text='Выбрать .gcode и отправить…');send_file_btn.pack(side='left',expand=True,fill='x',padx=(6,0))
     cancel_upload_btn=ttk.Button(fr,text='Отмена передачи',state='disabled');cancel_upload_btn.pack(side='left',padx=(6,0))
     ttk.Label(files_box,textvariable=upload_status).pack(anchor='w',pady=(6,0))
-    ttk.Label(files_box,text='Файл загружается на принтер локально по FTPS/TLS в папку cache. Автоматический запуск пока не выполняется.',foreground='#475569',wraplength=760).pack(anchor='w',pady=(3,0))
+    ttk.Label(files_box,text='Файл отправляется в корень хранилища A1 по LAN. Sibir Cut только передаёт файл и НИКОГДА не запускает его автоматически — запуск выполняется с экрана принтера.',foreground='#475569',wraplength=760).pack(anchor='w',pady=(3,0))
 
     stat=ttk.LabelFrame(body,text='Состояние и координаты',padding=10);stat.pack(fill='x',pady=(10,0))
     ttk.Label(stat,textvariable=printer_status,style='Title.TLabel').pack(anchor='w')
@@ -533,7 +533,7 @@ def open_lan_control(app):
             send_last_btn.config(state='normal');send_file_btn.config(state='normal');cancel_upload_btn.config(state='disabled')
         except Exception:pass
         if result:
-            upload_status.set(f"Отправлено: {result.get('remote_path')} • {result.get('size_bytes')} байт")
+            upload_status.set(f"Отправлено на A1: {result.get('remote_path')} • {result.get('size_bytes')} байт • запуск с принтера")
         elif error:
             upload_status.set('Ошибка/отмена: '+str(error))
     def send_path(path):
