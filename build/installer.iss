@@ -1,5 +1,5 @@
 #define MyAppName "Sibir Cut"
-#define MyAppVersion "0.3.2"
+#define MyAppVersion "0.3.3"
 #define MyAppExeName "SibirCut.exe"
 
 [Setup]
@@ -9,7 +9,7 @@ AppVersion={#MyAppVersion}
 DefaultDirName={localappdata}\Programs\Sibir Cut
 DefaultGroupName=Sibir Cut
 OutputDir=..\dist
-OutputBaseFilename=Sibir_Cut_Setup_0.3.2_x64
+OutputBaseFilename=Sibir_Cut_Setup_0.3.3_x64
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -17,11 +17,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\{#MyAppExeName}
 SetupIconFile=..\assets\SibirCut.ico
-
-[InstallDelete]
-Type: files; Name: "{app}\NovatechCut.exe"
-Type: files; Name: "{group}\Novatech Cut.lnk"
-Type: files; Name: "{autodesktop}\Novatech Cut.lnk"
 
 [Files]
 Source: "..\dist\SibirCut.exe"; DestDir: "{app}"; Flags: ignoreversion
