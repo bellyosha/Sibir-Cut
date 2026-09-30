@@ -149,9 +149,84 @@ jobs:
             gh api --method DELETE "repos/$repo/actions/artifacts/$id"
           }
 
+      - name: Reset public release history
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $keep = "v0.3.3"
+
+          $releaseTags = gh api "repos/$repo/releases?per_page=100" --paginate --jq '.[].tag_name'
+          foreach ($tag in $releaseTags) {
+            if ($tag -and $tag -ne $keep) {
+              Write-Host "Deleting old release $tag"
+              gh release delete $tag --repo $repo --yes --cleanup-tag
+            }
+          }
+
+          $refs = gh api "repos/$repo/git/matching-refs/tags" --paginate --jq '.[].ref'
+          foreach ($ref in $refs) {
+            $tag = $ref -replace '^refs/tags/',''
+            if ($tag -and $tag -ne $keep) {
+              Write-Host "Deleting old tag $tag"
+              gh api --method DELETE "repos/$repo/git/refs/tags/$tag" 2>$null
+            }
+          }
+
+      - name: Publish Sibir Cut 0.3.3 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v0.3.3"
+          $repo = "${{ github.repository }}"
+          $notes = @"
+          # Sibir Cut 0.3.3
+
+          Первая публичная версия Sibir Cut для Windows.
+
+          **[Скачать установщик Sibir Cut 0.3.3 (.exe)](https://github.com/$repo/releases/download/v0.3.3/Sibir_Cut_Setup_0.3.3_x64.exe)**
+
+          Sibir Cut превращает Bambu Lab A1 в 2D-станок для рисования и резки с внешним держателем ручки или поворотного ножа.
+
+          Основные возможности:
+          - импорт SVG, DXF, PNG, JPG, JPEG, BMP и WebP;
+          - живое перемещение, вращение и масштабирование рисунка прямо на виртуальном столе;
+          - режимы «Резка» и «Рисование»;
+          - зеркальный режим «наизнанку»;
+          - штриховка и заливка фигур;
+          - компенсация поворотного ножа, Blade Offset и Overcut;
+          - отдельная калибровка ножа и ручки;
+          - пошаговая настройка безопасной Z, рабочей/контактной Z и Offset X/Y;
+          - поиск и сохранение Bambu Lab A1 в локальной сети;
+          - автоматическое подключение к сохранённому принтеру при запуске программы;
+          - отправка готового G-code на A1 по LAN;
+          - запуск переданного задания вручную с экрана принтера;
+          - сохранение проектов и настроек;
+          - проверка границ траектории и блокировка опасного экспорта;
+          - анимация готовой траектории.
+
+          > Sibir Cut находится в активной разработке. Возможны баги и зависания. Первые задания и новые настройки проверяйте на тестовом материале и не оставляйте принтер без присмотра.
+
+          Файлы релиза:
+          - **Sibir_Cut_Setup_0.3.3_x64.exe** — обычный установщик Windows;
+          - **Sibir_Cut_Portable_Windows_x64.zip** — portable-версия;
+          - **Sibir_Cut_v0.3.3_SOURCE.zip** — исходный код;
+          - **SHA256SUMS-WINDOWS.txt** — контрольные суммы.
+          "@
+
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $tag --repo $repo --yes
+          }
+
+          git tag -f $tag "${{ github.sha }}"
+          git push origin "refs/tags/$tag" --force
+          gh release create $tag --repo $repo --target "${{ github.sha }}" --title "Sibir Cut 0.3.3" --notes $notes
+          gh release upload $tag --repo $repo dist/Sibir_Cut_Setup_0.3.3_x64.exe dist/Sibir_Cut_Portable_Windows_x64.zip dist/Sibir_Cut_v0.3.3_SOURCE.zip dist/SHA256SUMS-WINDOWS.txt --clobber
+
       - name: Upload Windows artifacts
-        id: upload_windows
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Sibir-Cut-Windows-v0.3.3
@@ -162,17 +237,3 @@ jobs:
             dist/Sibir_Cut_Portable_Windows_x64.zip
             dist/Sibir_Cut_v0.3.3_SOURCE.zip
             dist/SHA256SUMS-WINDOWS.txt
-
-      - name: Publish release fallback
-        if: steps.upload_windows.outcome == 'failure'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = "v0.3.3"
-          $repo = "${{ github.repository }}"
-          gh release view $tag --repo $repo *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $repo --target "${{ github.sha }}" --title "Sibir Cut 0.3.3" --notes "Windows build 0.3.3. Actions artifact storage fallback."
-          }
-          gh release upload $tag --repo $repo dist/Sibir_Cut_Setup_0.3.3_x64.exe dist/Sibir_Cut_Portable_Windows_x64.zip dist/Sibir_Cut_v0.3.3_SOURCE.zip dist/SHA256SUMS-WINDOWS.txt --clobber
