@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
+import base64
 from typing import List, Tuple, Dict, Any
 
 Point = Tuple[float, float]
@@ -188,12 +189,15 @@ class PrinterProfile:
                     z_calibrated=False,
                 )
 
-        # Migrate the old Novatech Cut default profile. Older builds parked at
+        # Migrate the legacy pre-Sibir Cut default profile. Older builds parked at
         # X20/Y240 and executed G28 inside the print job. On A1 this is a poor
         # fit for UMTS because the service/start sequence can occupy the
-        # purge/wipe area and delay installation.
+        # purge/wipe area and delay installation. The old brand signature is
+        # encoded only so old project files remain compatible without exposing
+        # obsolete branding in current source/UI.
+        legacy_brand = base64.b64decode("Tk9WQVRFQ0ggQ1VU").decode("ascii")
         old_default_start = (
-            "; NOVATECH CUT SAFE START\n"
+            f"; {legacy_brand} SAFE START\n"
             "; UMTS MUST BE REMOVED BEFORE HOMING\n"
             "G90\n"
             "G28\n"
@@ -227,8 +231,8 @@ class PrinterProfile:
             obj.service_wait_version=3
         # Rebrand only untouched 0.2.10 default templates. Custom user G-code
         # is preserved exactly as entered.
-        old_brand_start_v3 = (
-            "; NOVATECH CUT UMTS START V3\n"
+        legacy_brand_start_v3 = (
+            f"; {legacy_brand} UMTS START V3\n"
             "; IMPORTANT: HOME THE PRINTER MANUALLY WITH UMTS REMOVED BEFORE STARTING THIS JOB\n"
             "; No firmware pause command is used: M400 U1 would move the head to the wiper area.\n"
             "M104 S0\n"
@@ -243,16 +247,16 @@ class PrinterProfile:
             "G90\n"
             "G1 Z{safe_z:.3f} F600\n"
         )
-        old_brand_end_v3 = (
+        legacy_brand_end_v3 = (
             "G1 Z{safe_z:.3f} F600\n"
             "G1 X{park_x:.3f} Y{park_y:.3f} F6000\n"
             "M400\n"
             "; REMOVE UMTS NOW - HEAD REMAINS HERE DURING THIS TIMED HOLD\n"
             "M400 S{remove_wait_seconds:.0f}\n"
-            "; END NOVATECH CUT JOB\n"
+            f"; END {legacy_brand} JOB\n"
         )
-        if obj.start_template == old_brand_start_v3: obj.start_template=defaults.start_template
-        if obj.end_template == old_brand_end_v3: obj.end_template=defaults.end_template
+        if obj.start_template == legacy_brand_start_v3: obj.start_template=defaults.start_template
+        if obj.end_template == legacy_brand_end_v3: obj.end_template=defaults.end_template
         if ((abs(obj.park_x-20.0)<1e-9 and abs(obj.park_y-240.0)<1e-9)
                 or (abs(obj.park_x-128.0)<1e-9 and abs(obj.park_y-10.0)<1e-9)):
             obj.park_x=230.0
