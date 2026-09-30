@@ -6,6 +6,8 @@
 
 ### [⬇ Скачать Sibir Cut 0.3.3 для Windows — установщик EXE](https://github.com/bellyosha/Sibir-Cut/releases/download/v0.3.3/Sibir_Cut_Setup_0.3.3_x64.exe)
 
+### [📖 Инструкция](docs/USER_GUIDE_RU.md)
+
 Также на странице релиза доступны portable-версия, исходники и SHA256:
 
 **https://github.com/bellyosha/Sibir-Cut/releases/tag/v0.3.3**
@@ -287,11 +289,6 @@ Sibir Cut пока развивается, поэтому ошибки возм�
 
 **Issues:** https://github.com/bellyosha/Sibir-Cut/issues
 
-## Подробная инструкция
-
-Для пошаговой инструкции с объяснением подключения и калибровки:
-
-**[Инструкция пользователя](docs/USER_GUIDE_RU.md)**
 
 ## Безопасность
 
