@@ -14,7 +14,7 @@ from .calibration_wizard import open_calibration_wizard
 from .job_settings import open_job_settings
 from .modern_ui import RoundedButton, RoundedPanel
 
-APP_TITLE='Sibir Cut 0.3.2'
+APP_TITLE='Sibir Cut 0.3.3'
 
 class App(tk.Tk):
     def __init__(self):
