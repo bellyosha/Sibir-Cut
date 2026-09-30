@@ -27,7 +27,7 @@ def _raster_regression_test(td: str) -> None:
             y=50+row*145
             cv2.rectangle(img,(x,y),(x+58,y+72),0,-1)
             cv2.circle(img,(x+75,y+35),18,0,3)
-    cv2.putText(img,'NOVATECH',(180,2250),cv2.FONT_HERSHEY_SIMPLEX,5,0,12,cv2.LINE_AA)
+    cv2.putText(img,'SIBIR CUT',(180,2250),cv2.FONT_HERSHEY_SIMPLEX,5,0,12,cv2.LINE_AA)
     png=Path(td)/'large-raster-regression.png'
     if not cv2.imwrite(str(png),img):
         raise RuntimeError('Could not write raster regression image')
@@ -349,7 +349,7 @@ def run_self_test() -> None:
         raise RuntimeError("Toolhead is not parked at the accessible edge before UMTS installation pause")
     if path_length(square) <= 0 or stats.cut_length_mm <= 0:
         raise RuntimeError("Self-test path statistics are invalid")
-    with tempfile.TemporaryDirectory(prefix="novatech-cut-selftest-") as td:
+    with tempfile.TemporaryDirectory(prefix="sibir-cut-selftest-") as td:
         out = Path(td) / "selftest.gcode.3mf"
         build_gcode_3mf(out, gcode, stats, profile_name=project.printer.name)
         if inspect_gcode_3mf(out) is not True:
@@ -376,7 +376,7 @@ def main() -> int:
     except Exception:
         tb=traceback.format_exc()
         try:
-            (Path(tempfile.gettempdir())/'novatech-cut-selftest-error.txt').write_text(tb,encoding='utf-8')
+            (Path(tempfile.gettempdir())/'sibir-cut-selftest-error.txt').write_text(tb,encoding='utf-8')
         except Exception:
             pass
         traceback.print_exc()
