@@ -10,7 +10,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: novatech-cut-windows-build
+  group: sibir-cut-windows-build
   cancel-in-progress: true
 
 jobs:
@@ -25,13 +25,13 @@ jobs:
       - name: Reconstruct GUI source
         shell: pwsh
         run: |
-          $parts = 1..4 | ForEach-Object { Get-Content ("novatech_cut/app.py.part" + $_) -Raw }
+          $parts = 1..4 | ForEach-Object { Get-Content ("sibir_cut/app.py.part" + $_) -Raw }
           [System.IO.File]::WriteAllText(
-            (Join-Path $PWD "novatech_cut/app.py"),
+            (Join-Path $PWD "sibir_cut/app.py"),
             ($parts -join ""),
             [System.Text.UTF8Encoding]::new($false)
           )
-          if (!(Test-Path "novatech_cut/app.py")) { throw "app.py reconstruction failed" }
+          if (!(Test-Path "sibir_cut/app.py")) { throw "app.py reconstruction failed" }
 
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
@@ -49,13 +49,13 @@ jobs:
 
       - name: Validate source
         run: |
-          python -m compileall -q novatech_cut
-          python -m novatech_cut --self-test
-          python -c "import novatech_cut.app; print('GUI import OK')"
-          python -c "from novatech_cut.app import calibration_gui_self_test; calibration_gui_self_test(); print('Calibration GUI OK')"
+          python -m compileall -q sibir_cut
+          python -m sibir_cut --self-test
+          python -c "import sibir_cut.app; print('GUI import OK')"
+          python -c "from sibir_cut.app import calibration_gui_self_test; calibration_gui_self_test(); print('Calibration GUI OK')"
 
       - name: Build Windows EXE
-        run: python -m PyInstaller --noconfirm --clean build/NovatechCut.spec
+        run: python -m PyInstaller --noconfirm --clean build/SibirCut.spec
 
       - name: Test frozen EXE
         shell: pwsh
@@ -63,13 +63,13 @@ jobs:
           if (!(Test-Path "dist/SibirCut.exe")) { throw "SibirCut.exe was not created" }
           $p = Start-Process -FilePath (Resolve-Path "dist/SibirCut.exe") -ArgumentList "--self-test" -Wait -PassThru
           if ($p.ExitCode -ne 0) {
-            $log = Join-Path $env:TEMP "novatech-cut-selftest-error.txt"
+            $log = Join-Path $env:TEMP "sibir-cut-selftest-error.txt"
             if (Test-Path $log) { Get-Content $log }
             throw "Frozen EXE self-test failed: exit $($p.ExitCode)"
           }
           $ui = Start-Process -FilePath (Resolve-Path "dist/SibirCut.exe") -ArgumentList "--ui-self-test" -Wait -PassThru
           if ($ui.ExitCode -ne 0) {
-            $log = Join-Path $env:TEMP "novatech-cut-ui-selftest-error.txt"
+            $log = Join-Path $env:TEMP "sibir-cut-ui-selftest-error.txt"
             if (Test-Path $log) { Get-Content $log }
             throw "Frozen calibration GUI self-test failed: exit $($ui.ExitCode)"
           }
@@ -103,13 +103,13 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "build\installer.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!(Test-Path "dist/Sibir_Cut_Setup_0.3.2_x64.exe")) { throw "Installer was not created" }
+          if (!(Test-Path "dist/Sibir_Cut_Setup_0.3.3_x64.exe")) { throw "Installer was not created" }
 
       - name: Test installer on clean directory
         shell: pwsh
         run: |
           $installDir = Join-Path $env:RUNNER_TEMP "SibirCutInstalled"
-          $setup = Resolve-Path "dist/Sibir_Cut_Setup_0.3.2_x64.exe"
+          $setup = Resolve-Path "dist/Sibir_Cut_Setup_0.3.3_x64.exe"
           $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART",("/DIR=" + $installDir) -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Installer failed: exit $($p.ExitCode)" }
           $installedExe = Join-Path $installDir "SibirCut.exe"
@@ -120,9 +120,9 @@ jobs:
       - name: Create source ZIP
         shell: pwsh
         run: |
-          Remove-Item novatech_cut/app.py.part* -Force
-          $items = @("novatech_cut","build","assets","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
-          Compress-Archive $items dist/Sibir_Cut_v0.3.2_SOURCE.zip -Force
+          Remove-Item sibir_cut/app.py.part* -Force
+          $items = @("sibir_cut","build","assets","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
+          Compress-Archive $items dist/Sibir_Cut_v0.3.3_SOURCE.zip -Force
 
       - name: Write SHA256 checksums
         shell: pwsh
@@ -130,8 +130,8 @@ jobs:
           @(
             "SibirCut.exe",
             "Sibir_Cut_Portable_Windows_x64.zip",
-            "Sibir_Cut_Setup_0.3.2_x64.exe",
-            "Sibir_Cut_v0.3.2_SOURCE.zip"
+            "Sibir_Cut_Setup_0.3.3_x64.exe",
+            "Sibir_Cut_v0.3.3_SOURCE.zip"
           ) | ForEach-Object {
             $h = Get-FileHash ("dist/" + $_) -Algorithm SHA256
             "$($h.Hash.ToLower())  $_"
@@ -154,13 +154,13 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: Sibir-Cut-Windows-v0.3.2
+          name: Sibir-Cut-Windows-v0.3.3
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/Sibir_Cut_Setup_0.3.2_x64.exe
+            dist/Sibir_Cut_Setup_0.3.3_x64.exe
             dist/Sibir_Cut_Portable_Windows_x64.zip
-            dist/Sibir_Cut_v0.3.2_SOURCE.zip
+            dist/Sibir_Cut_v0.3.3_SOURCE.zip
             dist/SHA256SUMS-WINDOWS.txt
 
       - name: Publish release fallback
@@ -169,10 +169,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.3.2"
+          $tag = "v0.3.3"
           $repo = "${{ github.repository }}"
           gh release view $tag --repo $repo *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --repo $repo --target "${{ github.sha }}" --title "Sibir Cut 0.3.2" --notes "Windows build 0.3.2. Actions artifact storage fallback."
+            gh release create $tag --repo $repo --target "${{ github.sha }}" --title "Sibir Cut 0.3.3" --notes "Windows build 0.3.3. Actions artifact storage fallback."
           }
-          gh release upload $tag --repo $repo dist/Sibir_Cut_Setup_0.3.2_x64.exe dist/Sibir_Cut_Portable_Windows_x64.zip dist/Sibir_Cut_v0.3.2_SOURCE.zip dist/SHA256SUMS-WINDOWS.txt --clobber
+          gh release upload $tag --repo $repo dist/Sibir_Cut_Setup_0.3.3_x64.exe dist/Sibir_Cut_Portable_Windows_x64.zip dist/Sibir_Cut_v0.3.3_SOURCE.zip dist/SHA256SUMS-WINDOWS.txt --clobber
