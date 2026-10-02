@@ -5,8 +5,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Any
 
-from .lan import BambuLanClient, BambuLanError, load_lan_config, save_lan_config
-from .discovery import BambuLanScanner
+from .lan import BambuLanClient, BambuLanError, load_lan_config, save_lan_config, check_lan_services
+from .discovery import BambuLanScanner, discovery_identity_hint
 
 
 def _saved_printers(cfg: dict[str, Any]) -> list[dict[str, str]]:
@@ -117,15 +117,18 @@ def _save_printer_record(cfg: dict[str, Any], record: dict[str,str], access_code
 
 
 def connect_printer(app, record: dict[str,str], access_code: str, *, remember: bool=True, quiet: bool=False) -> bool:
+    app._lan_connection_error=""
+    record=dict(record)
     host=str(record.get("host") or "").strip();serial=str(record.get("serial") or "").strip();code=str(access_code or "").strip()
-    if not host or not serial or not code:
+    if not host or not code:
+        app._lan_connection_error="Нужны IP и LAN access code. Serial можно ввести вручную или оставить пустым для автоопределения."
         if not quiet:
-            messagebox.showerror("Принтер","Нужны IP, серийный номер и LAN access code.",parent=app)
+            messagebox.showerror("Принтер",app._lan_connection_error,parent=app)
         return False
     old=getattr(app,"_lan_client",None)
     if old is not None:
         try:
-            if old.connected and old.host==host and old.serial==serial:
+            if old.connected and old.host==host and old.serial==serial and old.access_code==code:
                 _status(app,f"{record.get('name') or 'Bambu A1'} • {host} • подключен","ok")
                 return True
         except Exception:
@@ -137,6 +140,7 @@ def connect_printer(app, record: dict[str,str], access_code: str, *, remember: b
     try:
         client=BambuLanClient(host,code,serial,on_update=lambda:_refresh_connection_status(app))
         client.connect(timeout=6.0)
+        record["serial"]=serial=client.serial
         app._lan_client=client
         cfg=load_lan_config()
         cfg=_save_printer_record(cfg,record,code,remember)
@@ -144,7 +148,11 @@ def connect_printer(app, record: dict[str,str], access_code: str, *, remember: b
         _status(app,f"{record.get('name') or 'Bambu A1'} • {host} • подключен","ok")
         return True
     except Exception as exc:
+        app._lan_connection_error=str(exc)
         app._lan_client=None
+        if 'client' in locals():
+            try:client.close()
+            except Exception:pass
         _status(app,f"{record.get('name') or 'Bambu A1'} • нет связи","bad")
         if not quiet:
             messagebox.showerror("Подключение к принтеру",str(exc),parent=app)
@@ -207,9 +215,11 @@ def open_printer_manager(app):
     for lab,var,wid in [("Имя",name,16),("IP",host,14),("Serial",serial,20),("Access code",access,14)]:
         ttk.Label(edit,text=lab).pack(side="left",padx=(0,4));ttk.Entry(edit,textvariable=var,width=wid,show="*" if lab=="Access code" else "").pack(side="left",padx=(0,10))
     ttk.Checkbutton(saved_box,text="Запомнить access code на этом компьютере",variable=remember).pack(anchor="w",pady=(6,0))
+    ttk.Label(saved_box,text="Serial можно оставить пустым для автоопределения по MQTT. Нужен SN самого принтера, не AMS.",style="Muted.TLabel").pack(anchor="w",pady=(3,0))
     actions=ttk.Frame(saved_box);actions.pack(fill="x",pady=(8,0))
     connect_btn=ttk.Button(actions,text="Подключить / сделать активным");connect_btn.pack(side="left")
     disconnect_btn=ttk.Button(actions,text="Отключить");disconnect_btn.pack(side="left",padx=6)
+    diagnose_btn=ttk.Button(actions,text="Проверить LAN");diagnose_btn.pack(side="left",padx=(0,6))
     remove_btn=ttk.Button(actions,text="Удалить из списка");remove_btn.pack(side="left")
     advanced_btn=ttk.Button(actions,text="Расширенное LAN управление");advanced_btn.pack(side="right")
 
@@ -258,12 +268,29 @@ def open_printer_manager(app):
     def do_connect():
         rec={"name":name.get().strip() or "Bambu A1","model":"Bambu Lab A1","host":host.get().strip(),"serial":serial.get().strip()}
         code=access.get().strip()
+        remember_value=bool(remember.get())
         connect_btn.config(state="disabled")
         def worker():
-            ok=connect_printer(app,rec,code,remember=remember.get(),quiet=True)
+            ok=connect_printer(app,rec,code,remember=remember_value,quiet=True)
             def done():
+                if not w.winfo_exists():return
                 connect_btn.config(state="normal");refresh_saved()
-                if not ok:messagebox.showerror("Подключение","Не удалось подключиться. Проверьте access code, IP и LAN/Developer Mode.",parent=w)
+                if ok:
+                    c=getattr(app,"_lan_client",None)
+                    if c is not None:
+                        host.set(c.host);serial.set(c.serial)
+                else:messagebox.showerror("Подключение",getattr(app,"_lan_connection_error","") or "Не удалось подключиться. Используйте «Проверить LAN».",parent=w)
+            app.after(0,done)
+        threading.Thread(target=worker,daemon=True).start()
+
+    def diagnose():
+        target=host.get().strip();diagnose_btn.config(state="disabled")
+        def worker():
+            try:result=check_lan_services(target)
+            except Exception as exc:result=str(exc)
+            def done():
+                if not w.winfo_exists():return
+                diagnose_btn.config(state="normal");messagebox.showinfo("Проверка LAN",result,parent=w)
             app.after(0,done)
         threading.Thread(target=worker,daemon=True).start()
 
@@ -286,14 +313,18 @@ def open_printer_manager(app):
     def discovered_key(p):
         return str(p.serial or p.ip)
     def add_found(p):
+        for old_key,old in list(found.items()):
+            if old.ip==p.ip and old_key!=discovered_key(p):
+                found.pop(old_key,None)
+                if found_tree.exists(old_key):found_tree.delete(old_key)
         key=discovered_key(p);found[key]=p
-        vals=(p.name or "Bambu A1",p.model_name or p.model_code or "Bambu Lab",p.ip,p.serial or "—",p.signal or "—")
+        vals=(p.display_name(),p.model_name or p.model_code or "Выберите модель",p.ip,p.serial or "авто при подключении",p.signal or "—")
         if found_tree.exists(key):found_tree.item(key,values=vals)
         else:found_tree.insert("","end",iid=key,values=vals)
-        scan_status.set(f"Найдено: {len(found)}")
+        scan_status.set(f"Принтеров: {sum(p.source=='ssdp' for p in found.values())} • кандидатов по порту: {sum(p.source=='tcp' for p in found.values())}")
     def scan_done(items):
         scanner["running"]=False;scan_btn.config(state="normal")
-        scan_status.set(f"Готово • найдено {len(items)}")
+        scan_status.set(f"Готово • принтеров: {sum(p.source=='ssdp' for p in items)} • кандидатов: {sum(p.source=='tcp' for p in items)}")
     def do_scan():
         if scanner["running"]:return
         found.clear();found_tree.delete(*found_tree.get_children());scanner["running"]=True;scan_btn.config(state="disabled");scan_status.set("Сканирование…")
@@ -305,8 +336,8 @@ def open_printer_manager(app):
         p=found.get(sel[0])
         if p is None:return
         name.set(p.name or "Bambu A1");host.set(p.ip);serial.set(p.serial or "")
-        if p.serial:access.set(_access_for(load_lan_config(),p.serial))
-        if not p.serial:messagebox.showinfo("Принтер","IP найден, но SSDP не сообщил Serial. Введите серийный номер вручную.",parent=w)
+        access.set(_access_for(load_lan_config(),p.serial) if p.serial else "")
+        if not p.serial:messagebox.showinfo("Данные найденного адреса",discovery_identity_hint(p),parent=w)
 
     def open_advanced():
         from .lan_gui import open_lan_control
@@ -321,6 +352,7 @@ def open_printer_manager(app):
 
     saved.bind("<<TreeviewSelect>>",load_saved_fields);found_tree.bind("<Double-1>",use_found)
     connect_btn.config(command=do_connect);disconnect_btn.config(command=do_disconnect);remove_btn.config(command=do_remove)
+    diagnose_btn.config(command=diagnose)
     scan_btn.config(command=do_scan);use_btn.config(command=use_found);advanced_btn.config(command=open_advanced)
     w.protocol("WM_DELETE_WINDOW",closed)
     refresh_saved()

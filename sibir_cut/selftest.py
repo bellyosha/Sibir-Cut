@@ -304,6 +304,8 @@ def _service_wait_migration_test() -> None:
         raise RuntimeError('User-custom service waits must be preserved during migration')
 
 def run_self_test() -> None:
+    from .lan_checks import run_lan_checks
+    run_lan_checks()
     discovery_self_test()
     lan_self_test()
     transfer_self_test()

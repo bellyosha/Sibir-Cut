@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import copy
+import errno
 import json
 import os
+import re
+import socket
 import ssl
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
+from .discovery import clean_printer_serial
 
 try:
     import paho.mqtt.client as mqtt
@@ -17,6 +21,53 @@ except Exception:  # pragma: no cover
 
 class BambuLanError(RuntimeError):
     pass
+
+
+def _network_error_kind(exc: Exception) -> str:
+    code = getattr(exc, "winerror", None) or getattr(exc, "errno", None)
+    if isinstance(exc, ConnectionRefusedError) or code in (10061, errno.ECONNREFUSED):
+        return "refused"
+    if isinstance(exc, (TimeoutError, socket.timeout)) or code in (10060, errno.ETIMEDOUT):
+        return "timeout"
+    if isinstance(exc, socket.gaierror):
+        return "address"
+    if isinstance(exc, ssl.SSLError):
+        return "tls"
+    return "network"
+
+
+def connection_error_text(host: str, exc: Exception) -> str:
+    kind = _network_error_kind(exc)
+    if kind == "refused":
+        return (f"Принтер по адресу {host} отклонил подключение к порту 8883 (WinError 10061 / connection refused).\n\n"
+                "Пароль и Serial ещё не проверялись. Сверьте IP с экраном принтера, включите LAN Only и Developer Mode, если он есть в прошивке, затем повторите подключение.\n"
+                "ПК и принтер должны быть в одной локальной сети; гостевая Wi-Fi сеть и изоляция устройств могут мешать. Используйте «Проверить LAN», чтобы проверить порты 8883 и 990.")
+    if kind == "timeout":
+        return (f"Нет ответа от {host}:8883: истекло время ожидания.\n\n"
+                "Проверьте актуальный IP, питание/Wi-Fi принтера, одну локальную сеть, гостевую изоляцию, маршрут VPN и разрешение Sibir Cut в брандмауэре Windows. Используйте «Проверить LAN».")
+    if kind == "address":
+        return f"Не удалось найти адрес «{host}». Введите IP с экрана принтера без http:// и без номера порта."
+    if kind == "tls":
+        return (f"Порт {host}:8883 доступен, но защищённое MQTT-соединение не установлено.\n\n"
+                "Проверьте LAN Only / Developer Mode и перезапустите принтер. Sibir Cut использует TLS на порту 8883; менять его на 1883 не нужно.")
+    return f"Не удалось подключиться к {host}:8883. Проверьте IP и LAN/Developer Mode.\nТехническая причина: {exc}"
+
+
+def check_lan_services(host: str, timeout: float = 2.0) -> str:
+    host = str(host or "").strip()
+    if not host:
+        raise BambuLanError("Введите IP принтера для проверки LAN.")
+    lines = [f"Проверка адреса: {host}"]
+    labels = {"refused": "соединение отклонено", "timeout": "нет ответа", "address": "адрес не найден", "network": "сетевая ошибка", "tls": "ошибка TLS"}
+    for name, port in (("MQTT", 8883), ("FTPS", 990)):
+        try:
+            with socket.create_connection((host, port), timeout=max(0.1, min(float(timeout), 5.0))):
+                lines.append(f"{name}, порт {port}: TCP доступен")
+        except Exception as exc:
+            lines.append(f"{name}, порт {port}: {labels[_network_error_kind(exc)]}")
+    lines.extend(["", "Это проверка сети. Access code, Serial и разрешение команд она не проверяет.",
+                  "Сверьте IP с экраном принтера. Для стороннего управления включите LAN Only / Developer Mode, если он предусмотрен прошивкой. Проверьте одну локальную сеть, гостевую изоляцию, VPN и брандмауэр Windows."])
+    return "\n".join(lines)
 
 
 def _merge_dict(dst: dict[str, Any], src: dict[str, Any]) -> None:
@@ -112,30 +163,33 @@ class BambuLanClient:
         self,
         host: str,
         access_code: str,
-        serial: str,
+        serial: str = "",
         on_update: Callable[[], None] | None = None,
     ) -> None:
         if mqtt is None:
             raise BambuLanError("Не установлен пакет paho-mqtt")
         self.host = str(host or "").strip()
         self.access_code = str(access_code or "").strip()
-        self.serial = str(serial or "").strip()
+        self.serial = clean_printer_serial(serial)
         if not self.host:
             raise BambuLanError("Укажите IP-адрес принтера")
         if not self.access_code:
             raise BambuLanError("Укажите LAN access code")
-        if not self.serial:
-            raise BambuLanError("Укажите серийный номер принтера")
+        if str(serial or "").strip() and not self.serial:
+            raise BambuLanError("Serial должен быть серийным номером принтера с экрана, без UUID/URN и пробелов. Можно оставить его пустым для автоопределения.")
 
-        self.report_topic = f"device/{self.serial}/report"
-        self.request_topic = f"device/{self.serial}/request"
+        self.report_topic = f"device/{self.serial}/report" if self.serial else "device/+/report"
+        self.request_topic = f"device/{self.serial}/request" if self.serial else ""
         self._lock = threading.RLock()
         self._state: dict[str, Any] = {}
         self._connected = False
+        self._verified = False
+        self._closing = False
         self._last_error = ""
         self._last_report_monotonic = 0.0
         self._seq = int(time.time() * 1000) % 1_000_000_000
         self._connect_event = threading.Event()
+        self._report_event = threading.Event()
         self._on_update = on_update
         self._position = {"x": None, "y": None, "z": None, "source": "unknown"}
 
@@ -156,11 +210,12 @@ class BambuLanClient:
         self._client.on_connect = self._handle_connect
         self._client.on_disconnect = self._handle_disconnect
         self._client.on_message = self._handle_message
+        self._client.on_subscribe = self._handle_subscribe
 
     @property
     def connected(self) -> bool:
         with self._lock:
-            return bool(self._connected)
+            return bool(self._connected and self._verified)
 
     @property
     def last_error(self) -> str:
@@ -168,25 +223,54 @@ class BambuLanClient:
             return self._last_error
 
     def connect(self, timeout: float = 6.0) -> None:
+        timeout = max(1.0, min(float(timeout), 30.0))
+        auto_serial = not self.serial
+        self._closing = False
         self._connect_event.clear()
+        self._report_event.clear()
+        deadline = time.monotonic() + timeout
         try:
+            self._client.connect_timeout = timeout
             self._client.connect(self.host, 8883, keepalive=30)
             self._client.loop_start()
         except Exception as exc:
-            raise BambuLanError(f"Не удалось подключиться к {self.host}:8883: {exc}") from exc
-        if not self._connect_event.wait(max(1.0, float(timeout))):
+            self.close()
+            raise BambuLanError(connection_error_text(self.host, exc)) from exc
+        if not self._connect_event.wait(max(0.0, deadline-time.monotonic())):
             self.close()
             raise BambuLanError(
                 "Принтер не подтвердил MQTT-подключение. Проверьте IP, LAN access code, "
                 "серийный номер, LAN Only/Developer Mode и нахождение ПК в одной сети."
             )
-        if not self.connected:
+        if not self._connected:
             err = self.last_error or "MQTT-подключение отклонено"
             self.close()
             raise BambuLanError(err)
-        self.request_status()
+        if self.serial:
+            try:
+                self.request_status()
+            except Exception:
+                self.close()
+                raise
+        received = self._report_event.wait(max(8.0, timeout))
+        if not received or not self.connected:
+            err = self.last_error
+            if not err:
+                err = ("MQTT-соединение установлено, но Serial не получен из статуса. Введите серийный номер принтера с его экрана вручную (не номер AMS), затем повторите подключение."
+                       if auto_serial else f"MQTT-соединение установлено, но нет статуса для Serial {self.serial}. Сверьте SN с экраном принтера (не AMS) и проверьте LAN/Developer Mode. Профиль не активирован.")
+            self.close()
+            raise BambuLanError(err)
+        if auto_serial:
+            try:
+                self._client.subscribe(self.report_topic, qos=0)
+                self._client.unsubscribe("device/+/report")
+                self.request_status()
+            except Exception:
+                self.close()
+                raise
 
     def close(self) -> None:
+        self._closing = True
         try:
             self._client.disconnect()
         except Exception:
@@ -197,6 +281,7 @@ class BambuLanClient:
             pass
         with self._lock:
             self._connected = False
+            self._verified = False
 
     def _notify(self) -> None:
         cb = self._on_update
@@ -216,10 +301,19 @@ class BambuLanClient:
                 rc = 1
         with self._lock:
             self._connected = rc == 0
-            self._last_error = "" if rc == 0 else f"MQTT вернул код подключения {rc}"
+            self._verified = False
+            self._report_event.clear()
+            self._state.clear()
+            self._position = {"x": None, "y": None, "z": None, "source": "unknown"}
+            self._last_report_monotonic = 0.0
+            self._last_error = ("" if rc == 0 else
+                "Принтер отклонил LAN access code. Скопируйте код с экрана принтера; пароль Wi-Fi и пароль Bambu-аккаунта не подходят."
+                if rc in (4, 5, 134, 135) else f"MQTT отклонил подключение (код {rc}). Проверьте LAN/Developer Mode и данные принтера.")
         if rc == 0:
             try:
-                client.subscribe(self.report_topic, qos=0)
+                result = client.subscribe(self.report_topic, qos=0)
+                if result[0] != 0:
+                    raise BambuLanError("Не удалось подписаться на MQTT-статус принтера.")
             except Exception as exc:
                 with self._lock:
                     self._last_error = str(exc)
@@ -230,7 +324,24 @@ class BambuLanClient:
     def _handle_disconnect(self, client, userdata, *args) -> None:
         with self._lock:
             self._connected = False
+            self._verified = False
+            if not self._closing and not self._last_error:
+                self._last_error = "MQTT-соединение разорвано принтером. Проверьте LAN/Developer Mode и повторите подключение."
+        self._connect_event.set()
+        self._report_event.set()
         self._notify()
+
+    def _handle_subscribe(self, client, userdata, mid, reason_codes, *extra) -> None:
+        codes = [getattr(value, "value", value) for value in reason_codes]
+        if any(int(value) >= 128 for value in codes):
+            with self._lock:
+                self._last_error = ("Принтер не разрешил подписку для автоопределения Serial. Введите SN с экрана принтера вручную."
+                                    if not self.serial else "Принтер отклонил подписку на статус. Проверьте Serial и LAN/Developer Mode.")
+                self._connected = False
+                self._verified = False
+            self._connect_event.set()
+            self._report_event.set()
+            self._notify()
 
     @staticmethod
     def _extract_report_position(print_state: dict[str, Any]) -> dict[str, float] | None:
@@ -257,25 +368,39 @@ class BambuLanClient:
         return None
 
     def _handle_message(self, client, userdata, message) -> None:
+        match = re.fullmatch(r"device/([A-Za-z0-9_-]+)/report", str(getattr(message, "topic", "")))
+        if not match:
+            return
         try:
             data = json.loads(message.payload.decode("utf-8", errors="replace"))
-            if not isinstance(data, dict):
+            if not isinstance(data, dict) or not isinstance(data.get("print"), dict) or not data["print"]:
                 return
         except Exception:
             return
         with self._lock:
+            incoming_serial = clean_printer_serial(match.group(1))
+            if not incoming_serial or (self.serial and incoming_serial != self.serial):
+                return
+            if not self.serial:
+                self.serial = incoming_serial
+                self.report_topic = f"device/{self.serial}/report"
+                self.request_topic = f"device/{self.serial}/request"
             _merge_dict(self._state, data)
+            self._verified = True
             self._last_report_monotonic = time.monotonic()
             p = data.get("print") if isinstance(data.get("print"), dict) else {}
             reported = self._extract_report_position(p)
             if reported:
                 self._position.update(reported)
                 self._position["source"] = "printer"
+        self._report_event.set()
         self._notify()
 
-    def _publish(self, payload: dict[str, Any]) -> None:
-        if not self.connected:
+    def _publish(self, payload: dict[str, Any], *, require_report: bool = True) -> None:
+        if not self._connected or (require_report and not self.connected):
             raise BambuLanError("Нет подключения к принтеру")
+        if not self.serial or not self.request_topic:
+            raise BambuLanError("Serial ещё не подтверждён. Управление принтером недоступно.")
         raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         try:
             info = self._client.publish(self.request_topic, raw, qos=0)
@@ -294,7 +419,7 @@ class BambuLanClient:
             return seq
 
     def request_status(self) -> None:
-        self._publish(build_pushall_request(self._sequence()))
+        self._publish(build_pushall_request(self._sequence()), require_report=False)
 
     def send_gcode(self, gcode: str) -> None:
         self._publish(build_gcode_request(self._sequence(), gcode))
