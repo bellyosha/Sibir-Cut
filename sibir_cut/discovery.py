@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import ipaddress
+import re
+import select
 import socket
 import struct
 import threading
@@ -83,11 +85,28 @@ def _clean_location(value: str, fallback_ip: str = "") -> str:
         return fallback_ip or candidate
 
 
+def clean_printer_serial(value: str) -> str:
+    serial = str(value or "").strip().split("::", 1)[0]
+    if serial.lower().startswith("uuid:"):
+        serial = serial[5:].strip()
+    # A generic UPnP UUID is not a printer SN. Never guess a calibration key.
+    if re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", serial):
+        return ""
+    return serial if re.fullmatch(r"[A-Za-z0-9_-]+", serial) else ""
+
+
+def discovery_identity_hint(printer: DiscoveredPrinter) -> str:
+    if printer.serial:
+        return f"Выбран: {printer.display_name()} • {printer.ip} • Serial {printer.serial}"
+    source = ("Найден адрес с открытым портом 8883; это ещё не подтверждённый принтер."
+              if printer.source == "tcp" else "Принтер ответил на поиск без серийного номера.")
+    return source + " Сверьте IP с экраном A1 и введите access code. Serial можно оставить пустым: программа попробует получить его из MQTT-статуса. Если это не удастся, введите SN с экрана принтера (не AMS)."
+
+
 def parse_bambu_ssdp(data: bytes | str, addr: tuple[str, int] | None = None) -> DiscoveredPrinter | None:
     first, h = _headers_from_packet(data)
     nt = h.get("nt", "") or h.get("st", "")
     model = h.get("devmodel.bambu.com", "")
-    usn = h.get("usn", "") or h.get("devserial.bambu.com", "")
     location = h.get("location", "")
     sender_ip = addr[0] if addr else ""
 
@@ -102,9 +121,7 @@ def parse_bambu_ssdp(data: bytes | str, addr: tuple[str, int] | None = None) -> 
     ip = _clean_location(location, sender_ip)
     if not ip:
         return None
-    serial = usn.strip()
-    if serial.lower().startswith("uuid:"):
-        serial = serial[5:].strip()
+    serial = clean_printer_serial(h.get("devserial.bambu.com", "")) or clean_printer_serial(h.get("usn", ""))
     model_name = MODEL_NAMES.get(model, model)
     return DiscoveredPrinter(
         ip=ip,
@@ -214,7 +231,7 @@ class BambuLanScanner:
             # A rich SSDP record always wins over a bare TCP:8883 candidate.
             if p.source == "tcp" and any(other.ip == p.ip and other.source == "ssdp" for other in self._found.values()):
                 return
-            old = self._found.get(key)
+            old = self._found.get(key) or next((other for other in self._found.values() if other.ip == p.ip), None)
             if old is not None:
                 # Prefer rich SSDP metadata over a bare port-scan candidate.
                 if p.source == "tcp" and old.source == "ssdp":
@@ -231,11 +248,12 @@ class BambuLanScanner:
                     p.signal = old.signal
                 if not p.firmware:
                     p.firmware = old.firmware
+            key = self._key(p)
             self._found[key] = p
             # If SSDP arrived after a TCP candidate for the same IP, remove duplicate.
             if p.serial:
                 for k, other in list(self._found.items()):
-                    if k != key and other.ip == p.ip and other.source == "tcp":
+                    if k != key and other.ip == p.ip:
                         self._found.pop(k, None)
         if self.on_printer:
             try:
@@ -245,6 +263,7 @@ class BambuLanScanner:
 
     @staticmethod
     def _make_listener(port: int) -> socket.socket | None:
+        s = None
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -252,18 +271,22 @@ class BambuLanScanner:
                 s.bind(("", port))
             except OSError:
                 s.bind((SSDP_GROUP, port))
-            try:
-                mreq = struct.pack("=4s4s", socket.inet_aton(SSDP_GROUP), socket.inet_aton("0.0.0.0"))
-                s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            except Exception:
-                pass
+            for interface in ["0.0.0.0", *_local_ipv4_addresses()[:6]]:
+                try:
+                    mreq = struct.pack("=4s4s", socket.inet_aton(SSDP_GROUP), socket.inet_aton(interface))
+                    s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+                except Exception:
+                    pass
             s.settimeout(0.18)
             return s
         except Exception:
+            if s is not None:
+                s.close()
             return None
 
     @staticmethod
-    def _send_search() -> None:
+    def _send_search() -> list[socket.socket]:
+        sockets = []
         payloads = []
         for port in SSDP_PORTS:
             payloads.append(
@@ -278,33 +301,39 @@ class BambuLanScanner:
                     (SSDP_GROUP, port),
                 )
             )
-        for local_ip in _local_ipv4_addresses() or ["0.0.0.0"]:
+        for local_ip in _local_ipv4_addresses()[:6] or ["0.0.0.0"]:
+            s = None
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
                 s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                 s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-                try:
-                    if local_ip != "0.0.0.0":
-                        s.bind((local_ip, 0))
-                        s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(local_ip))
-                except Exception:
-                    pass
+                s.bind((local_ip, 0))
+                if local_ip != "0.0.0.0":
+                    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(local_ip))
                 for data, dest in payloads:
                     try:
                         s.sendto(data, dest)
                     except Exception:
                         pass
-                s.close()
+                # SSDP replies target the M-SEARCH source port, not necessarily
+                # 1990/2021. Keep this socket alive and receive its unicast reply.
+                s.settimeout(0.18)
+                sockets.append(s)
             except Exception:
-                pass
+                if s is not None:
+                    s.close()
+        return sockets
 
     def _listen_ssdp(self, duration: float) -> None:
         sockets = [s for s in (self._make_listener(p) for p in SSDP_PORTS) if s is not None]
-        self._send_search()
+        sockets.extend(self._send_search())
         deadline = time.monotonic() + max(1.0, duration)
         try:
             while not self._stop.is_set() and time.monotonic() < deadline:
-                for s in sockets:
+                if not sockets:
+                    break
+                ready, _, _ = select.select(sockets, [], [], min(0.18, max(0.0, deadline-time.monotonic())))
+                for s in ready:
                     try:
                         data, addr = s.recvfrom(8192)
                     except socket.timeout:
@@ -353,8 +382,8 @@ class BambuLanScanner:
                 self._emit(
                     DiscoveredPrinter(
                         ip=ip,
-                        model_name="Bambu / MQTT 8883",
-                        name="Кандидат Bambu",
+                        model_name="Модель не подтверждена",
+                        name="Кандидат по порту 8883",
                         source="tcp",
                         last_seen=time.time(),
                     )

@@ -2,7 +2,7 @@ name: Windows build
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'staging/0.3.3-lan-hotfix']
   workflow_dispatch:
 
 permissions:
@@ -10,11 +10,12 @@ permissions:
   actions: write
 
 concurrency:
-  group: sibir-cut-windows-build
+  group: sibir-cut-windows-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
+    if: github.repository == 'bellyosha/Sibir-Cut' && github.event.repository.private == false
     runs-on: windows-latest
     timeout-minutes: 35
 
@@ -48,11 +49,16 @@ jobs:
         run: python build/make_icon.py
 
       - name: Validate source
+        shell: pwsh
         run: |
           python -m compileall -q sibir_cut
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m sibir_cut --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -c "import sibir_cut.app; print('GUI import OK')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -c "from sibir_cut.app import calibration_gui_self_test; calibration_gui_self_test(); print('Calibration GUI OK')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows EXE
         run: python -m PyInstaller --noconfirm --clean build/SibirCut.spec
@@ -121,8 +127,15 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item sibir_cut/app.py.part* -Force
-          $items = @("sibir_cut","build","assets","docs","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
+          $items = @("sibir_cut","build","assets","docs","launcher.py","README.md","LICENSE.txt","THIRD_PARTY_NOTICES.md","requirements-windows.txt","pyproject.toml")
           Compress-Archive $items dist/Sibir_Cut_v0.3.3_SOURCE.zip -Force
+
+      - name: Test source ZIP
+        shell: pwsh
+        run: |
+          Expand-Archive dist/Sibir_Cut_v0.3.3_SOURCE.zip source-test -Force
+          python source-test/launcher.py --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Write SHA256 checksums
         shell: pwsh
@@ -137,44 +150,8 @@ jobs:
             "$($h.Hash.ToLower())  $_"
           } | Set-Content dist/SHA256SUMS-WINDOWS.txt
 
-      - name: Free old Actions artifact storage
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $repo = "${{ github.repository }}"
-          $ids = gh api "repos/$repo/actions/artifacts?per_page=100" --paginate --jq '.artifacts[] | select(.expired == false) | .id'
-          foreach ($id in $ids) {
-            Write-Host "Deleting old Actions artifact $id"
-            gh api --method DELETE "repos/$repo/actions/artifacts/$id"
-          }
-
-      - name: Reset public release history
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $repo = "${{ github.repository }}"
-          $keep = "v0.3.3"
-
-          $releaseTags = gh api "repos/$repo/releases?per_page=100" --paginate --jq '.[].tag_name'
-          foreach ($tag in $releaseTags) {
-            if ($tag -and $tag -ne $keep) {
-              Write-Host "Deleting old release $tag"
-              gh release delete $tag --repo $repo --yes --cleanup-tag
-            }
-          }
-
-          $refs = gh api "repos/$repo/git/matching-refs/tags" --paginate --jq '.[].ref'
-          foreach ($ref in $refs) {
-            $tag = $ref -replace '^refs/tags/',''
-            if ($tag -and $tag -ne $keep) {
-              Write-Host "Deleting old tag $tag"
-              gh api --method DELETE "repos/$repo/git/refs/tags/$tag" 2>$null
-            }
-          }
-
-      - name: Publish Sibir Cut 0.3.3 release
+      - name: Update existing Sibir Cut 0.3.3 release
+        if: github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -185,6 +162,8 @@ jobs:
           # Sibir Cut 0.3.3
 
           Первая публичная версия Sibir Cut для Windows.
+
+          Обновление 02.10.2026: исправлен поиск Serial и приём ответов SSDP; добавлены автоопределение SN, проверка LAN и точные сообщения об ошибках подключения. Номер версии остаётся 0.3.3.
 
           **[Скачать установщик Sibir Cut 0.3.3 (.exe)](https://github.com/$repo/releases/download/v0.3.3/Sibir_Cut_Setup_0.3.3_x64.exe)**
 
@@ -217,14 +196,23 @@ jobs:
           "@
 
           gh release view $tag --repo $repo *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release delete $tag --repo $repo --yes
-          }
-
-          git tag -f $tag "${{ github.sha }}"
-          git push origin "refs/tags/$tag" --force
-          gh release create $tag --repo $repo --target "${{ github.sha }}" --title "Sibir Cut 0.3.3" --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw "Existing v0.3.3 release was not found; no new release will be created" }
+          $notesPath = Join-Path $env:RUNNER_TEMP "sibir-cut-033-release-notes.md"
+          [System.IO.File]::WriteAllText($notesPath, $notes, [System.Text.UTF8Encoding]::new($false))
           gh release upload $tag --repo $repo dist/Sibir_Cut_Setup_0.3.3_x64.exe dist/Sibir_Cut_Portable_Windows_x64.zip dist/Sibir_Cut_v0.3.3_SOURCE.zip dist/SHA256SUMS-WINDOWS.txt --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh api --method PATCH "repos/$repo/git/refs/tags/$tag" -f sha="${{ github.sha }}" -F force=true
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit $tag --repo $repo --target "${{ github.sha }}" --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload installer EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sibir-Cut-Installer-v0.3.3
+          if-no-files-found: error
+          retention-days: 30
+          path: dist/Sibir_Cut_Setup_0.3.3_x64.exe
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -233,7 +221,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/Sibir_Cut_Setup_0.3.3_x64.exe
             dist/Sibir_Cut_Portable_Windows_x64.zip
             dist/Sibir_Cut_v0.3.3_SOURCE.zip
             dist/SHA256SUMS-WINDOWS.txt

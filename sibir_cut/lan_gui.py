@@ -5,8 +5,8 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-from .lan import BambuLanClient, BambuLanError, load_lan_config, save_lan_config
-from .discovery import BambuLanScanner, DiscoveredPrinter
+from .lan import BambuLanClient, BambuLanError, load_lan_config, save_lan_config, check_lan_services
+from .discovery import BambuLanScanner, DiscoveredPrinter, discovery_identity_hint
 from .transfer import upload_file, BambuTransferError, UploadCancelled
 
 
@@ -156,10 +156,12 @@ def open_lan_control(app):
         ttk.Entry(net,textvariable=var,show=show).grid(row=row,column=1,sticky='ew',pady=3,padx=(6,0))
     ttk.Checkbutton(net,text='Запомнить access code на этом компьютере',variable=remember).grid(row=3,column=0,columnspan=2,sticky='w',pady=(4,0))
     ttk.Label(net,text='Для сторонних LAN-команд на актуальной прошивке нужен LAN/Developer Mode.',foreground='#b45309',wraplength=760).grid(row=4,column=0,columnspan=2,sticky='w',pady=(6,2))
+    ttk.Label(net,text='Serial можно оставить пустым для автоопределения из MQTT-статуса. SN принтера и номер AMS — разные значения.',wraplength=760).grid(row=6,column=0,columnspan=2,sticky='w',pady=(4,0))
     bar=ttk.Frame(net);bar.grid(row=5,column=0,columnspan=2,sticky='ew',pady=(8,0))
     connect_btn=ttk.Button(bar,text='Подключиться');connect_btn.pack(side='left')
     disconnect_btn=ttk.Button(bar,text='Отключиться');disconnect_btn.pack(side='left',padx=5)
     refresh_btn=ttk.Button(bar,text='Обновить статус');refresh_btn.pack(side='left')
+    diagnose_btn=ttk.Button(bar,text='Проверить LAN');diagnose_btn.pack(side='left',padx=5)
     ttk.Label(bar,textvariable=conn_status).pack(side='left',padx=10)
 
     scanbox=ttk.LabelFrame(body,text='Принтеры Bambu в локальной сети',padding=10);scanbox.pack(fill='x',pady=(10,0))
@@ -467,14 +469,18 @@ def open_lan_control(app):
     def _printer_key(p):
         return str(p.serial or p.ip)
     def _source_name(source):
-        return 'SSDP' if source=='ssdp' else ('MQTT 8883' if source=='tcp' else str(source or '—'))
+        return 'SSDP' if source=='ssdp' else ('TCP 8883' if source=='tcp' else str(source or '—'))
     def add_discovered(p):
         try:
+            for old_key,old in list(discovered.items()):
+                if old.ip==p.ip and old_key!=_printer_key(p):
+                    discovered.pop(old_key,None)
+                    if printer_tree.exists(old_key):printer_tree.delete(old_key)
             key=_printer_key(p);discovered[key]=p
             values=(p.name or '—',p.model_name or p.model_code or 'Bambu Lab',p.ip,p.serial or '—',p.signal or '—',_source_name(p.source))
             if printer_tree.exists(key):printer_tree.item(key,values=values)
             else:printer_tree.insert('', 'end', iid=key, values=values)
-            real=sum(1 for x in discovered.values() if x.serial)
+            real=sum(1 for x in discovered.values() if x.source=='ssdp')
             candidates=len(discovered)-real
             scan_status.set(f'Найдено: {real} Bambu' + (f' + {candidates} кандид.' if candidates else ''))
         except Exception:pass
@@ -482,7 +488,7 @@ def open_lan_control(app):
         scanner['running']=False
         try:scan_btn.config(state='normal');stop_scan_btn.config(state='disabled')
         except Exception:return
-        real=sum(1 for x in items if x.serial);candidates=len(items)-real
+        real=sum(1 for x in items if x.source=='ssdp');candidates=len(items)-real
         if items:
             scan_status.set(f'Готово: {real} Bambu' + (f', {candidates} кандид. по 8883' if candidates else ''))
         else:
@@ -517,16 +523,14 @@ def open_lan_control(app):
         p=discovered.get(sel[0])
         if p is None:return
         host.set(p.ip)
+        serial.set(p.serial or '')
+        from .printer_manager import _access_for
+        access.set(_access_for(load_lan_config(),p.serial) if p.serial else '')
         if p.serial:
-            serial.set(p.serial)
-            codes=cfg.get('access_codes',{}) if isinstance(cfg.get('access_codes',{}),dict) else {}
-            if p.serial in codes and codes[p.serial]:access.set(str(codes[p.serial]))
-            load_saved_tool_calibrations();update_offset_status()
             scan_status.set(f'Выбран: {p.display_name()} • {p.ip}')
         else:
-            scan_status.set(f'Выбран IP {p.ip}; SSDP не сообщил серийный номер — введите SN вручную.')
-        try:save_cfg()
-        except Exception:pass
+            scan_status.set(f'Выбран IP {p.ip}; введите access code, Serial можно определить при подключении.')
+            messagebox.showinfo('Данные найденного адреса',discovery_identity_hint(p),parent=w)
     def upload_done(result,error):
         upload_state['busy']=False
         try:
@@ -573,18 +577,39 @@ def open_lan_control(app):
         disconnect();connecting['value']=True;connect_btn.config(state='disabled');conn_status.set('Подключение…')
         try:save_cfg()
         except Exception:pass
+        target=(host.get().strip(),access.get().strip(),serial.get().strip())
         def worker():
+            c=None
             try:
-                c=BambuLanClient(host.get().strip(),access.get().strip(),serial.get().strip());c.connect(timeout=7.0);err=None
-            except Exception as exc:c=None;err=exc
+                c=BambuLanClient(*target);c.connect(timeout=7.0);err=None
+            except Exception as exc:
+                if c is not None:c.close()
+                c=None;err=exc
             def finish():
+                if not w.winfo_exists():
+                    if c is not None:c.close()
+                    return
                 connecting['value']=False;connect_btn.config(state='normal')
                 if err is not None:
                     conn_status.set('Ошибка подключения');messagebox.showerror('LAN подключение',str(err),parent=w);return
+                host.set(c.host);serial.set(c.serial);access.set(c.access_code)
+                from .printer_manager import _save_printer_record
+                data=_save_printer_record(load_lan_config(),{'host':c.host,'serial':c.serial,'model':'Bambu Lab A1','name':'Bambu A1'},c.access_code,remember.get())
+                cfg.clear();cfg.update(data)
                 app._lan_client=c;conn_status.set('Подключено');reset_position();load_saved_tool_calibrations();update_offset_status()
             try:app.after(0,finish)
             except Exception:
                 if c is not None:c.close()
+        threading.Thread(target=worker,daemon=True).start()
+    def diagnose():
+        target=host.get().strip();diagnose_btn.config(state='disabled')
+        def worker():
+            try:result=check_lan_services(target)
+            except Exception as exc:result=str(exc)
+            def done():
+                if not w.winfo_exists():return
+                diagnose_btn.config(state='normal');messagebox.showinfo('Проверка LAN',result,parent=w)
+            app.after(0,done)
         threading.Thread(target=worker,daemon=True).start()
     def update_position_text(c):
         ps=c.position_snapshot();parts=[]
@@ -623,6 +648,7 @@ def open_lan_control(app):
         disconnect();app._lan_window=None;w.destroy()
 
     connect_btn.config(command=connect_now);disconnect_btn.config(command=disconnect);refresh_btn.config(command=refresh_status)
+    diagnose_btn.config(command=diagnose)
     scan_btn.config(command=scan_network);stop_scan_btn.config(command=stop_scan);use_scan_btn.config(command=use_selected_printer);printer_tree.bind('<Double-1>',use_selected_printer)
     send_last_btn.config(command=send_last);send_file_btn.config(command=choose_and_send);cancel_upload_btn.config(command=cancel_upload)
     home_btn.config(command=do_home);manual_home_btn.config(command=manual_home_done)

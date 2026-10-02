@@ -140,6 +140,8 @@ def calibration_gui_self_test():
         handles=app._transform_handles(0)
         if not handles or 'rotate' not in handles or 'scale' not in handles:
             raise RuntimeError('Live transform handles were not created')
+        from .lan_checks import lan_dialog_self_test
+        lan_dialog_self_test(app)
     finally:
         if app is not None:
             try:app.destroy()
